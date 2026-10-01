@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Order support · Configuration prototype</title>
+<style>
+:root{
+ --ink:#0e1419;--ink-2:#17202a;--ink-3:#222d38;--ink-line:#2b3743;--ink-text:#c6d0d8;--ink-muted:#7f8c97;
+ --bg:#f2f3f0;--dot:#c6ccc4;--surface:#fff;--sunken:#f7f8f6;--line:#e0e3dd;--line-2:#eceee9;
+ --text:#131a20;--muted:#5d6871;--faint:#929ba2;
+ --teal:#0c7166;--teal-strong:#095b52;--teal-soft:#e2f1ee;--teal-line:#97cfc5;
+ --rose:#bf2f4b;--rose-soft:#fbe8ec;--amber:#8f5400;--amber-soft:#fcf0da;
+ --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+ --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+ --shadow:0 1px 2px rgb(14 20 25/.06),0 10px 28px rgb(14 20 25/.11);
+}
+[data-type=retrieval]{--c:#0c7166;--c-soft:#e2f1ee}
+[data-type=condition]{--c:#8f5400;--c-soft:#fcf0da}
+[data-type=http]{--c:#3f47b5;--c-soft:#e8e9fa}
+[data-type=agent]{--c:#6b39b8;--c-soft:#efe8fa}
+[data-type=handoff]{--c:#bf2f4b;--c-soft:#fbe8ec}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:6px 11px;line-height:1.3}
+button:hover:not(:disabled){border-color:#c5cbc2;background:var(--sunken)}
+button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.btn-primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn-primary:hover:not(:disabled){background:var(--teal-strong);border-color:var(--teal-strong)}
+.btn-danger{color:var(--rose)}
+.btn-danger-solid{background:var(--rose);border-color:var(--rose);color:#fff;font-weight:600}
+.btn-danger-solid:hover:not(:disabled){background:#a3233d;border-color:#a3233d}
+.btn-ghost{border-color:transparent;background:transparent}
+input,select,textarea{width:100%;border:1px solid var(--line);background:var(--sunken);border-radius:7px;padding:7px 9px}
+input:focus,select:focus,textarea:focus{background:#fff;border-color:var(--teal-line)}
+input[readonly]{color:var(--muted)}
+textarea{resize:vertical;min-height:96px}
+label{display:block;margin:12px 0 5px;color:var(--muted);font-weight:500;font-size:12px}
+.mono{font-family:var(--mono)}
+.help{font-size:12px;color:var(--muted);margin:6px 0;line-height:1.5}
+.tag{font:600 10px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:3px 5px;border-radius:4px;background:var(--line-2);color:var(--muted);white-space:nowrap}
+kbd{font:11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fff;color:var(--muted)}
+[hidden]{display:none!important}
+.panel{animation:appear .16s ease-out}
+@keyframes appear{from{opacity:.5;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+/* shell */
+.app{height:100vh;display:grid;grid-template-columns:52px minmax(0,1fr)}
+.rail{background:var(--ink);display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0}
+.logo{width:30px;height:30px;border-radius:8px;background:var(--teal);color:#fff;display:grid;place-items:center;font:700 15px var(--mono);margin-bottom:14px}
+.rail-item{width:34px;height:34px;display:grid;place-items:center;border-radius:8px;color:var(--ink-muted);font-size:15px}
+.rail-item.active{background:var(--ink-3);color:#fff}
+.main{min-width:0;min-height:0;display:flex;flex-direction:column}
+.topbar{background:var(--ink-2);color:var(--ink-text);display:flex;align-items:center;gap:8px;padding:8px 14px;flex-wrap:wrap;border-bottom:1px solid var(--ink-line)}
+.crumbs{display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap;margin-right:6px}
+.crumbs span{color:var(--ink-muted)}
+.crumbs h1{font-size:14px;margin:0;color:#fff;font-weight:600}
+.topbar>button,.topbar .seg{background:var(--ink-3);border-color:var(--ink-line);color:var(--ink-text)}
+.topbar>button:hover:not(:disabled){background:#2c3946;border-color:#3b4956}
+.topbar>.btn-primary{background:var(--teal);border-color:#159282;color:#fff}
+.topbar>.btn-primary:hover:not(:disabled){background:#0f8577}
+.seg{display:flex;border:1px solid;border-radius:8px;padding:2px}
+.seg button{border:0;background:transparent;padding:4px 11px;color:var(--ink-muted);border-radius:6px}
+.seg button:hover:not(:disabled){background:transparent;color:#fff}
+.seg button[aria-pressed=true]{background:var(--ink);color:#fff}
+.spacer{flex:1}
+.version{font:12px var(--mono);color:var(--ink-muted);white-space:nowrap}
+.topbar>.pill-warn{background:#3a2a12;border-color:#6b4a14;color:#f3c77a}
+.topbar>.pill-conflict{background:#3d1a22;border-color:#7a2a3b;color:#f6a8b8}
+.proto{position:relative}
+.proto summary{list-style:none;cursor:pointer;border:1px dashed #56636f;border-radius:7px;padding:5px 9px;font:600 11px var(--mono);letter-spacing:.05em;color:#f3c77a}
+.proto summary::-webkit-details-marker{display:none}
+.proto-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:280px;background:#fff;color:var(--text);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:12px 14px}
+.proto-panel .check{display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px}
+.proto-panel .check input{width:auto}
+.proto-panel button{width:100%;margin-top:8px}
+.work{flex:1;min-height:0;display:flex;position:relative}
+.restricted{margin:48px auto;max-width:520px;align-self:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:24px}
+.restricted h2{margin:0 0 6px;font-size:16px}
+
+/* canvas */
+#visual{position:relative;flex:1;min-width:0;overflow:hidden}
+#canvasViewport{position:absolute;inset:0;overflow:hidden;background-color:var(--bg);background-image:radial-gradient(circle,var(--dot) 1px,transparent 1.3px);cursor:grab;touch-action:none}
+#canvasViewport.panning{cursor:grabbing}
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
+#wires{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+.edge{fill:none;stroke-width:2}
+.edge.ok{stroke:var(--teal)}
+.edge.alt{stroke:#87918a;stroke-dasharray:6 5}
+.edge.bad{stroke:var(--rose);stroke-dasharray:3 4}
+.edge.selected{stroke-width:4}
+.edge.pending{stroke:var(--teal);stroke-dasharray:5 4;stroke-width:2}
+.edge-hit{fill:none;stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}
+.edge-label{font:600 10.5px var(--mono);paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round;pointer-events:none}
+.edge-label.ok{fill:var(--teal)}.edge-label.alt{fill:#5d6871}.edge-label.bad{fill:var(--rose)}
+#edgePop{position:absolute;transform:translate(-50%,-150%);white-space:nowrap;background:var(--ink);color:#fff;border-color:var(--ink);font-size:12px;box-shadow:var(--shadow);z-index:6}
+#edgePop:hover{background:var(--rose)!important;border-color:var(--rose)!important}
+.flow-node{position:absolute;width:224px;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:9px;box-shadow:0 1px 2px rgb(14 20 25/.06);cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none}
+.flow-node:hover{border-color:#c9cfc6;border-left-color:var(--c)}
+.flow-node.selected{box-shadow:0 0 0 2px var(--teal),0 8px 22px rgb(12 113 102/.16)}
+.flow-node.dragging{box-shadow:var(--shadow);cursor:grabbing;z-index:5}
+.flow-node.drop-target{box-shadow:0 0 0 2px var(--teal),0 0 0 7px var(--teal-soft)}
+.flow-node.pulse{animation:pulse .9s ease-out both}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgb(12 113 102/.6)}100%{box-shadow:0 0 0 16px rgb(12 113 102/0)}}
+.node-head{display:flex;gap:9px;align-items:center;padding:10px 11px 4px}
+.node-icon{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;background:var(--c-soft);color:var(--c);font-size:13px;flex:none}
+.node-kind{font:600 9.5px/1 var(--mono);letter-spacing:.08em;color:var(--c);text-transform:uppercase}
+.node-title{font-weight:600;font-size:13.5px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.entry-badge{margin-left:auto;font:600 9.5px/1 var(--mono);letter-spacing:.06em;background:var(--ink);color:#fff;border-radius:4px;padding:4px 5px;flex:none}
+.node-detail{padding:0 11px 9px 44px;color:var(--muted);font-size:11.5px}
+.node-outs{border-top:1px solid var(--line-2)}
+.out{position:relative;display:flex;justify-content:flex-end;align-items:center;height:26px;padding:0 15px 0 11px;font-size:11.5px;color:var(--muted)}
+.out+.out{border-top:1px dashed var(--line-2)}
+.out.none{justify-content:flex-start;color:var(--faint)}
+.out.broken{color:var(--rose);font-weight:500}
+.port-in{position:absolute;left:-6px;top:22px;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid #98a199}
+.port-out{position:absolute;right:-8px;top:50%;width:15px;height:15px;margin-top:-7.5px;border-radius:50%;background:#fff;border:2px solid var(--k);cursor:crosshair;display:grid;place-items:center;font:700 11px/1 var(--sans);color:transparent;transition:transform .1s}
+.port-out::after{content:'+'}
+.port-out:hover{transform:scale(1.35);background:var(--k);color:#fff}
+.out.broken .port-out{border-style:dashed}
+.canvas-hint{position:absolute;left:14px;top:12px;margin:0;font-size:11.5px;color:var(--muted);background:rgb(242 243 240/.88);padding:4px 8px;border-radius:6px;pointer-events:none}
+.canvas-bar{position:absolute;left:14px;bottom:14px;display:flex;gap:2px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px;box-shadow:var(--shadow);z-index:8}
+.canvas-bar button{border-color:transparent;padding:5px 9px}
+.canvas-bar .sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+#zoomLabel{font:12px var(--mono);min-width:42px;text-align:center;color:var(--muted)}
+#minimap{position:absolute;left:14px;bottom:62px;width:184px;height:112px;background:rgb(255 255 255/.94);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);cursor:pointer;z-index:8;touch-action:none}
+.mm-node{fill:var(--c)}
+.mm-view{fill:rgb(12 113 102/.08);stroke:var(--teal);stroke-width:1.5}
+
+/* inspector */
+.inspector{position:absolute;top:12px;right:12px;width:336px;max-height:calc(100% - 24px);overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:0 16px 16px;z-index:10}
+.insp-head{position:sticky;top:0;background:#fff;display:flex;align-items:center;gap:10px;padding:14px 0 12px;border-bottom:1px solid var(--line-2);z-index:1}
+.section{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:20px 0 4px}
+.entry-row{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--muted)}
+.entry-row .entry-badge{margin:0}
+.out-row{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px;align-items:center;margin:7px 0}
+.out-row label{margin:0}
+.out-row.broken label{color:var(--rose)}
+.out-row.broken select{border-color:#e9a3b2;background:var(--rose-soft)}
+.fixture{background:var(--sunken);border:1px solid var(--line-2);border-radius:7px;padding:8px 10px;font:12px var(--mono);color:var(--muted);margin-top:8px}
+
+/* developer */
+#developer{flex:1;min-width:0;display:grid;grid-template-columns:190px minmax(0,1fr);background:#fff}
+.outline{border-right:1px solid var(--line);padding:14px 8px;overflow:auto;background:var(--sunken)}
+.outline h3{font:600 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:0 8px 8px}
+.outline button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:4px 8px;font:12px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.outline button:hover{background:#fff;color:var(--text)}
+.outline button.sub{padding-left:20px}
+.editor-wrap{display:flex;flex-direction:column;min-height:0;padding:14px 18px;gap:8px}
+.editor-wrap h2{font-size:15px;margin:0;display:flex;gap:8px;align-items:center}
+.editor-wrap .help{margin:0}
+.editor{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex:1;min-height:300px;background:var(--sunken)}
+#gutter{margin:0;padding:10px 8px;text-align:right;color:var(--faint);font:12px/1.7 var(--mono);background:#eef0ec;user-select:none;overflow:hidden;min-width:44px}
+#code{border:0;border-radius:0;font:12px/1.7 var(--mono);resize:none;flex:1;padding:10px 12px;white-space:pre;overflow:auto;tab-size:2;background:transparent;min-height:0;height:auto}
+#code:focus{background:#fff}
+.err-box{border:1px solid #efc1cb;background:var(--rose-soft);color:var(--rose);border-radius:8px;padding:10px 12px}
+#errors{white-space:pre-wrap;font:12px/1.6 var(--mono)}
+.err-actions{display:flex;gap:6px;margin-top:8px}
+
+/* preview chat */
+.test-panel{width:384px;flex:none;background:#fff;border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;z-index:20}
+.tp-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line-2)}
+.tp-head h2{font-size:14px;margin:0;white-space:nowrap}
+.tp-head button{white-space:nowrap}
+.pin-note{font-size:12px;padding:8px 14px;background:var(--amber-soft);color:var(--amber);border-bottom:1px solid #f1dcb4;line-height:1.5}
+.chat-log{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--sunken)}
+.msg{max-width:90%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.5}
+.msg.customer{align-self:flex-end;background:var(--ink-2);color:#fff;border-bottom-right-radius:4px}
+.msg.agent{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px;width:90%}
+.msg.system{align-self:center;background:var(--amber-soft);color:var(--amber);font-size:12px;border-radius:999px;padding:5px 12px;text-align:center}
+.msg-meta{font:600 11px var(--mono);color:var(--muted);margin-bottom:4px;display:flex;gap:6px;align-items:center}
+.trace{margin-top:9px;border-top:1px dashed var(--line);padding-top:7px}
+.trace summary{cursor:pointer;font:12px var(--mono);color:var(--teal)}
+.trace-steps{display:flex;flex-direction:column;gap:3px;margin:7px 0}
+.trace-steps button{text-align:left;font:12px var(--mono);padding:4px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.trace-steps button.gone{color:var(--faint)}
+.trace pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);color:var(--muted);margin:6px 0 0;background:var(--sunken);padding:8px;border-radius:6px}
+.composer{border-top:1px solid var(--line-2);padding:10px 14px 12px}
+.composer .help{margin:0 0 8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{border-radius:999px;font-size:12px;padding:5px 11px}
+.empty{color:var(--faint);text-align:center;margin:auto;font-size:12px;max-width:240px}
+
+/* status bar */
+.statusbar{display:flex;align-items:center;gap:10px;padding:5px 12px;background:#fff;border-top:1px solid var(--line);font-size:12px;flex-wrap:wrap}
+#status{color:var(--muted);flex:1;min-width:240px}
+#status::before{content:'●';color:var(--teal);margin-right:7px;font-size:8px;vertical-align:2px}
+.scen{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.scen strong{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-right:4px}
+.scen button{font-size:11.5px;padding:3px 8px}
+.scen button[aria-pressed=true]{background:var(--teal-soft);border-color:var(--teal-line);color:var(--teal-strong)}
+#guide{margin:0;font-weight:500}
+#guide:empty{display:none}
+#next{padding:3px 10px;font-size:12px}
+
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:0;width:min(460px,calc(100vw - 32px));color:var(--text)}
+dialog::backdrop{background:rgb(14 20 25/.38)}
+.dlg-head{padding:16px 18px 4px}
+.dlg-head h2{margin:0;font-size:15px}
+.dlg-body{padding:6px 18px 14px}
+.dlg-body ul{margin:8px 0;padding-left:18px;font:12px/1.8 var(--mono)}
+.dlg-foot{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line-2);background:var(--sunken);flex-wrap:wrap}
+.pick-list{display:flex;flex-direction:column;gap:2px;max-height:320px;overflow:auto;margin-top:8px}
+.pick{display:flex;gap:11px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;padding:8px}
+.pick:hover,.pick:focus-visible{background:var(--sunken);border-color:var(--line)}
+.pick b{display:block;font-size:13px;font-weight:600}
+.pick small{color:var(--muted);font-size:12px}
+#conflictDialog{width:min(860px,calc(100vw - 32px))}
+.diff-wrap{overflow:auto;max-height:50vh;border:1px solid var(--line-2);border-radius:8px}
+table.diff{width:100%;border-collapse:collapse;font:12px/1.5 var(--mono)}
+.diff th,.diff td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line-2);vertical-align:top;overflow-wrap:anywhere}
+.diff th{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;background:var(--sunken);position:sticky;top:0}
+.diff td:first-child,.diff td:last-child{white-space:nowrap}
+.diff tr.clash td{background:var(--rose-soft)}
+.diff td.win{font-weight:600;color:var(--teal-strong)}
+.diff td.lose{text-decoration:line-through;color:var(--faint)}
+#overwriteNote{margin-top:10px}
+
+.reduce-motion *,.reduce-motion *::before,.reduce-motion *::after{animation:none!important;transition:none!important}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@media (max-width:1000px){
+ .test-panel{position:absolute;right:0;top:0;bottom:0;width:min(384px,100%);box-shadow:var(--shadow)}
+ .work:has(#testPanel:not([hidden])) .inspector{right:396px;width:min(336px,calc(100% - 408px))}
+ .version{display:none}
+}
+@media (max-width:720px){
+ .app{grid-template-columns:1fr}.rail{display:none}
+ .crumbs span{display:none}
+ .topbar{gap:6px;padding:8px 10px}
+ .inspector{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-height:58%}
+ #minimap,.canvas-hint{display:none}
+ .canvas-bar{bottom:auto;top:10px;left:10px}
+ #developer{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+ .outline{display:flex;gap:2px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:6px}
+ .outline h3{display:none}.outline button,.outline button.sub{width:auto;padding:4px 8px}
+ .test-panel{width:100%}
+ .scen strong{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<nav class="rail" aria-hidden="true" title="Decorative navigation — not part of this prototype">
+ <div class="logo">c</div>
+ <span class="rail-item active">◇</span><span class="rail-item">▤</span><span class="rail-item">☰</span><span class="rail-item">◔</span>
+</nav>
+<div class="main">
+<header class="topbar">
+ <div class="crumbs"><span>Photobook</span><span>/</span><span>Customer service</span><span>/</span><h1>Order support</h1></div>
+ <div class="seg owner-only" role="group" aria-label="Configuration view"><button id="visualTab" aria-pressed="true">Workflow</button><button id="developerTab" aria-pressed="false">JSON</button></div>
+ <span class="spacer"></span>
+ <span id="version" class="version owner-only"></span>
+ <button id="issues" class="pill-warn" hidden></button>
+ <button id="conflictPill" class="pill-conflict" hidden></button>
+ <button id="testToggle" class="owner-only" aria-expanded="false" aria-controls="testPanel">▷ Preview chat</button>
+ <button id="publish" class="btn-primary owner-only">Publish</button>
+ <details class="proto" id="protoMenu"><summary>PROTOTYPE ▾</summary><div class="proto-panel">
+  <p class="help">Review controls for this throwaway prototype — not product UI. All data is simulated; reload resets everything.</p>
+  <label for="role">Preview as role</label><select id="role"><option>Owner</option><option>Support</option></select>
+  <label class="check"><input id="motion" type="checkbox"> Reduce motion</label>
+  <button id="remoteUpdate">Simulate another Owner publishing</button>
+  <button id="reset">Reset demo</button>
+ </div></details>
+</header>
+<div class="work">
+ <section id="restricted" class="restricted panel" hidden><h2>Configuration unavailable</h2><p class="help">Support uses the inbox and customer memory. Agent/workflow configuration, the JSON view and execution traces require Owner access.</p></section>
+ <div id="visual" class="panel">
+  <div id="canvasViewport" aria-label="Workflow canvas"><div id="world"><svg id="wires" aria-hidden="true"></svg><div id="nodes"></div><button id="edgePop" hidden>✕ Disconnect</button></div></div>
+  <p class="canvas-hint">Drag empty space to pan · <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + scroll to zoom · drag a <b>+</b> port to connect</p>
+  <svg id="minimap" role="img" aria-label="Minimap. Click or drag to move the view."></svg>
+  <div class="canvas-bar">
+   <button id="zoomOut" aria-label="Zoom out">−</button><span id="zoomLabel">100%</span><button id="zoomIn" aria-label="Zoom in">+</button><button id="fitView">Fit</button>
+   <span class="sep"></span><button id="addNode">＋ Add step <kbd>/</kbd></button><button id="fit" title="Arrange steps left to right by depth">Tidy</button>
+  </div>
+  <section class="inspector" id="inspector" aria-label="Step settings" hidden>
+   <div class="insp-head"><span id="inspIcon" class="node-icon"></span><div style="min-width:0;flex:1"><div id="selectedTitle" class="node-kind"></div><div id="inspTitle" class="node-title"></div></div><button id="closeInspector" class="btn-ghost" aria-label="Close step settings">✕</button></div>
+   <label for="stepId">Step ID</label><input id="stepId" class="mono" readonly>
+   <div id="entryRow" class="entry-row"></div>
+   <div id="stepSettings"></div>
+   <div id="knowledgeSettings"><label for="knowledge">Knowledge source</label><input id="knowledge"></div>
+   <div id="agentSettings"><div class="section">Agent</div><label for="name">Agent name</label><input id="name"><label for="instructions">Instructions</label><textarea id="instructions"></textarea><p class="help">Model: prototype-default · allowed action: order_status</p></div>
+   <div id="actionSettings"><div class="section">HTTP request</div><label for="endpoint">Approved HTTPS endpoint</label><input id="endpoint" type="url"><div class="fixture">GET · order_status</div><p class="help">Credential reference <span class="mono">order_api</span> · customer authorization required · secrets are never exposed.</p></div>
+   <div id="handoffSettings"><p class="help">Pauses automation and places the conversation in the support queue until an operator returns it.</p></div>
+   <div class="section">Outputs</div><div id="connections"></div>
+   <button id="removeNode" class="btn-danger" style="margin-top:18px">Delete step…</button>
+  </section>
+ </div>
+ <div id="developer" class="panel" hidden>
+  <nav class="outline" id="outline" aria-label="JSON sections"></nav>
+  <div class="editor-wrap">
+   <h2>Configuration <span class="tag">JSON · shared draft</span></h2>
+   <p class="help">Same draft as the workflow view. Supported agent, action and workflow settings only — no code. Invalid text stays here until corrected or discarded. <span class="mono">null</span> marks an unconnected output.</p>
+   <div class="editor"><pre id="gutter" aria-hidden="true"></pre><textarea id="code" spellcheck="false" wrap="off" aria-label="Editable configuration JSON"></textarea></div>
+   <div id="errorBox" class="err-box" role="alert" hidden><div id="errors"></div><div class="err-actions"><button id="gotoError" hidden>Go to error</button><button id="discard">Discard invalid text</button></div></div>
+   <details><summary class="help" style="display:list-item;cursor:pointer">API action contract</summary><p class="help">Input: order_id and verified customer identity. Output: order_id and status. Approved HTTPS destination, credential reference and customer authorization are mandatory. No requests are sent.</p></details>
+  </div>
+ </div>
+ <aside id="testPanel" class="test-panel panel" hidden aria-label="Preview chat">
+  <div class="tp-head"><h2>Preview chat</h2><span class="tag">Simulated</span><span class="spacer"></span><button id="run">↻ New chat</button><button id="closeTest" class="btn-ghost" aria-label="Close preview chat">✕</button></div>
+  <div id="pinNote" class="pin-note" hidden></div>
+  <div id="chatLog" class="chat-log"></div>
+  <div class="composer"><p class="help">Customer: verified identity [redacted] · fixtures only, no API calls</p>
+   <div class="chips"><button id="continue">“Any update on PB-1042?”</button><button id="fail">Order API times out</button><button id="handoff">“Can I talk to a person?”</button></div></div>
+ </aside>
+</div>
+<footer class="statusbar">
+ <span id="status" role="status" aria-live="polite"></span>
+ <div class="scen"><strong>Review scenarios</strong><button data-scenario="roundtrip">Preserve edits</button><button data-scenario="invalid">Invalid JSON</button><button data-scenario="publication">Versions</button><button data-scenario="conflict">Conflict</button><button data-scenario="access">Access</button></div>
+ <p id="guide"></p><button id="next" class="btn-primary" hidden>Next step →</button>
+</footer>
+</div></div>
+
+<dialog id="picker" aria-labelledby="pickerTitle">
+ <div class="dlg-head"><h2 id="pickerTitle">Add step</h2></div>
+ <div class="dlg-body"><input id="pickerSearch" placeholder="Search step types…" aria-label="Search step types" autocomplete="off"><div id="pickList" class="pick-list"></div></div>
+ <div class="dlg-foot"><span class="help" style="margin-right:auto"><kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> add · <kbd>Esc</kbd> close</span><button class="dlg-cancel">Cancel</button></div>
+</dialog>
+<dialog id="deleteDialog" aria-labelledby="deleteTitle">
+ <div class="dlg-head"><h2 id="deleteTitle"></h2></div>
+ <div class="dlg-body"><p id="deleteSummary" class="help"></p><ul id="deleteList"></ul><p class="help">Nothing is rerouted automatically. Reconnect the outputs on the canvas or in settings; publishing stays blocked until you do.</p></div>
+ <div class="dlg-foot"><button class="dlg-cancel" autofocus>Cancel</button><button id="confirmDelete" class="btn-danger-solid">Delete step</button></div>
+</dialog>
+<dialog id="conflictDialog" aria-labelledby="conflictTitle">
+ <div class="dlg-head"><h2 id="conflictTitle"></h2><p class="help" id="conflictIntro"></p></div>
+ <div class="dlg-body"><div class="diff-wrap"><table class="diff"><thead><tr><th>Field</th><th id="thBase"></th><th>Your draft</th><th id="thTheirs"></th><th>Changed by</th></tr></thead><tbody id="diffRows"></tbody></table></div><p id="overwriteNote" class="help"></p></div>
+ <div class="dlg-foot"><button class="dlg-cancel">Decide later</button><button id="reloadRemote" class="btn-danger"></button><button id="rebase" class="btn-primary"></button></div>
+</dialog>
+
+<script>
+// ponytail: one agent and one read-only action; production needs its full action schema and authorization service.
+const initial={schemaVersion:1,agent:{id:'support',name:'Order support',instructions:'Answer from assigned knowledge. Use authorized order lookup; hand off unsupported requests.',knowledge:['policies'],model:'prototype-default',allowedActions:['order_status']},action:{id:'order_status',method:'GET',url:'https://orders.example.com/status',credentialRef:'order_api',requiresCustomerAuthorization:true},workflow:{entry:'retrieve',steps:[{id:'retrieve',type:'retrieval',next:'route'},{id:'route',type:'condition',field:'intent',equals:'order_status',yes:'lookup',fallback:'reply'},{id:'lookup',type:'http',action:'order_status',next:'reply',failure:'handoff'},{id:'reply',type:'agent',agent:'support',unsupported:'handoff'},{id:'handoff',type:'handoff'}]}};
+initial.workflow.positions={retrieve:{x:0,y:160},route:{x:280,y:160},lookup:{x:560,y:0},reply:{x:840,y:200},handoff:{x:1120,y:440}};
+const OUTPUTS={retrieval:['next'],condition:['yes','fallback'],http:['next','failure'],agent:['unsupported'],handoff:[]};
+const LINK_KEYS=['next','yes','fallback','failure','unsupported'];
+const EDGE_KIND={next:'ok',yes:'ok',fallback:'alt',failure:'bad',unsupported:'bad'};
+const EDGE_TEXT={yes:'Yes',fallback:'Else',failure:'Failure',unsupported:'Unsupported'};
+const KIND_COLOR={ok:'var(--teal)',alt:'#87918a',bad:'var(--rose)'};
+const TYPES={retrieval:{icon:'▤',name:'Knowledge',desc:'Search the assigned knowledge source'},condition:{icon:'⑂',name:'Condition',desc:'Branch on a classified field'},http:{icon:'↗',name:'API action',desc:'Authorized GET for live business data'},agent:{icon:'✦',name:'Agent reply',desc:'Compose the reply to the customer'},handoff:{icon:'☏',name:'Human takeover',desc:'Pause automation; send to support queue'}};
+const GRID=20;
+const clone=x=>JSON.parse(JSON.stringify(x));
+const canonical=x=>JSON.stringify(x,(_,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
+const $=id=>document.getElementById(id);
+const stepOf=(c,id)=>c.workflow.steps.find(s=>s.id===id);
+function h(tag,props={},...kids){const el=document.createElement(tag);for(const[k,v]of Object.entries(props)){if(k==='data')Object.assign(el.dataset,v);else if(k in el&&!k.includes('-'))el[k]=v;else el.setAttribute(k,v);}el.append(...kids.flat().filter(k=>k!=null&&k!==false));return el;}
+
+function validate(c){
+ const issues=[];
+ if(!c||typeof c!=='object'||Array.isArray(c))return ['Configuration must be an object.'];
+ if(JSON.stringify(Object.keys(c).sort())!==JSON.stringify(Object.keys(initial).sort()))issues.push('Only schemaVersion, agent, action, and workflow are supported.');
+ if(c.schemaVersion!==1)issues.push('schemaVersion must be 1.');
+ for(const key of ['name','instructions'])if(typeof c.agent?.[key]!=='string'||!c.agent[key].trim())issues.push('agent.'+key+' is required.');
+ if(!Array.isArray(c.agent?.knowledge)||c.agent.knowledge.length!==1||typeof c.agent.knowledge[0]!=='string'||!c.agent.knowledge[0].trim())issues.push('agent.knowledge requires one source.');
+ if(c.action?.method!=='GET')issues.push('action.method: only read-only GET is supported.');
+ try{const u=new URL(c.action?.url);if(u.protocol!=='https:'||u.hostname!=='orders.example.com'||u.username||u.password)throw Error();}catch{issues.push('action.url must use approved HTTPS host orders.example.com without embedded credentials.');}
+ if(c.action?.requiresCustomerAuthorization!==true)issues.push('action.requiresCustomerAuthorization must remain true.');
+ if(c.action?.credentialRef!=='order_api')issues.push('action.credentialRef must reference order_api.');
+ // Reject fields the fixed visual model cannot represent; never silently drop them.
+ if(c.agent&&canonical({...c.agent,name:initial.agent.name,instructions:initial.agent.instructions,knowledge:initial.agent.knowledge})!==canonical(initial.agent))issues.push('Agent structure, model, and allowed actions are fixed in this demo.');
+ if(c.action&&canonical({...c.action,url:initial.action.url})!==canonical(initial.action))issues.push('Action structure is fixed in this demo.');
+ const w=c.workflow;
+ if(!w||!Array.isArray(w.steps)||!w.steps.length)issues.push('workflow.steps requires at least one step.');
+ else {
+  const ids=w.steps.map(s=>s?.id);if(new Set(ids).size!==ids.length)issues.push('Step IDs must be unique.');
+  // null = deliberately unconnected: structurally valid, but blocks publication (see blockers).
+  if(w.entry!==null&&!ids.includes(w.entry))issues.push('Entry must reference an existing step or be null.');
+  const allowed={retrieval:['id','type','next'],condition:['id','type','field','equals','yes','fallback'],http:['id','type','action','next','failure'],agent:['id','type','agent','unsupported'],handoff:['id','type']};
+  for(const step of w.steps){
+   const keys=allowed[step?.type];if(!keys){issues.push('Unsupported step type.');continue;}
+   if(!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(step.id))issues.push('Step ID must start with a letter and use letters, digits, underscores or hyphens.');
+   if(Object.keys(step).some(k=>!keys.includes(k)))issues.push(step.id+': unsupported field.');
+   for(const k of keys){if(LINK_KEYS.includes(k)&&step[k]===null)continue;if(typeof step[k]!=='string'||!step[k])issues.push(step.id+': '+k+' required.');}
+   for(const k of LINK_KEYS)if(typeof step[k]==='string'&&!ids.includes(step[k]))issues.push(step.id+': '+k+' points to a missing step.');
+   if(step.type==='http'&&step.action!=='order_status')issues.push('HTTP steps must use order_status.');
+   if(step.type==='agent'&&step.agent!=='support')issues.push('Agent steps must use support.');
+  }
+  if(Object.keys(w).some(k=>!['entry','steps','positions'].includes(k)))issues.push('Unsupported workflow field.');
+  if(!w.positions||typeof w.positions!=='object')issues.push('Workflow positions required.');
+  else for(const id of ids){const p=w.positions[id];if(!p||!Number.isFinite(p.x)||!Number.isFinite(p.y))issues.push('Numeric position required for '+id);}
+ }
+ return issues;
+}
+function blockers(c){
+ const b=[];if(c.workflow.entry===null)b.push({id:null,text:'No start step'});
+ for(const s of c.workflow.steps)for(const k of OUTPUTS[s.type])if(s[k]===null)b.push({id:s.id,text:s.id+' · '+outLabel(s,k)+' is unconnected'});
+ return b;
+}
+function outLabel(s,k){return s.type==='http'&&k==='next'?'Success':k==='yes'?'If '+s.field+' = '+s.equals:{next:'Next',fallback:'Else',failure:'On failure',unsupported:'Unsupported'}[k];}
+function title(s){return s.type==='agent'?draft.agent.name:s.id[0].toUpperCase()+s.id.slice(1).replace(/[_-]/g,' ');}
+function detail(s){return {retrieval:'Source · '+draft.agent.knowledge[0],condition:s.field+' = '+s.equals,http:'GET · order_status',agent:'Knowledge + live business data',handoff:'Pauses automation'}[s.type];}
+
+// Three-way comparison: arrays (e.g. workflow.steps) compare as whole values.
+function flat(o,p='',out={}){for(const[k,v]of Object.entries(o)){const path=p?p+'.'+k:k;if(v&&typeof v==='object'&&!Array.isArray(v))flat(v,path,out);else out[path]=JSON.stringify(v);}return out;}
+function diff3(base,mine,theirs){const B=flat(base),M=flat(mine),T=flat(theirs);return [...new Set([...Object.keys(B),...Object.keys(M),...Object.keys(T)])].filter(p=>M[p]!==B[p]||T[p]!==B[p]).map(p=>({path:p,base:B[p],mine:M[p],theirs:T[p],local:M[p]!==B[p],remote:T[p]!==B[p]}));}
+function merge(base,mine,theirs){const out=clone(theirs);for(const r of diff3(base,mine,theirs))if(r.local){const ks=r.path.split('.'),last=ks.pop();let o=out;for(const k of ks)o=o[k]??={};if(r.mine===undefined)delete o[last];else o[last]=JSON.parse(r.mine);}return out;}
+
+let draft,published,basePublished,text,errors,view,version,baseVersion,conversation,selected=null,selectedEdge=null,guideSteps=[],guideIndex=0;
+let cam={x:0,y:0,k:1},live={},offsets={},sizes={},pending=null,animateRun=null,chatCount=0;
+const vp=$('canvasViewport');
+
+function reset(){draft=clone(initial);published=clone(initial);basePublished=clone(initial);text=JSON.stringify(draft,null,2);errors=[];view='visual';version=1;baseVersion=1;selected=null;selectedEdge=null;conversation=null;$('testPanel').hidden=true;$('role').value='Owner';document.querySelectorAll('dialog[open]').forEach(d=>d.close());render('Demo reset. Draft equals published v1.');fitView();}
+function dirty(){return errors.length>0||JSON.stringify(draft)!==JSON.stringify(basePublished);}
+function render(message){
+ const owner=$('role').value==='Owner',fk=document.activeElement?.dataset?.focusKey;
+ document.querySelectorAll('.owner-only').forEach(e=>e.hidden=!owner);
+ $('restricted').hidden=owner;$('visual').hidden=!owner||view!=='visual';$('developer').hidden=!owner||view!=='developer';
+ if(!owner)$('testPanel').hidden=true;$('testToggle').setAttribute('aria-expanded',!$('testPanel').hidden);
+ $('visualTab').setAttribute('aria-pressed',view==='visual');$('developerTab').setAttribute('aria-pressed',view==='developer');
+ const block=blockers(draft),stale=version!==baseVersion;
+ $('publish').disabled=!owner||errors.length>0||!dirty()||block.length>0;
+ $('publish').title=errors.length?'Fix or discard invalid JSON first':block.length?'Connect every output first':!dirty()?'No unpublished changes':'';
+ $('issues').hidden=!owner||!block.length||errors.length>0;$('issues').textContent='⚠ '+block.length+' to fix';$('issues').title=block.map(b=>b.text).join('\n');
+ $('conflictPill').hidden=!owner||!stale;$('conflictPill').textContent='v'+version+' published elsewhere · Compare';
+ $('version').textContent='Draft on v'+baseVersion+' · '+(dirty()?'unpublished changes':'no changes');
+ $('status').textContent=message||('Showing '+view+' view.');
+ $('errors').textContent=errors.join('\n');$('errorBox').hidden=!errors.length;$('gotoError').hidden=errorOffset()===null;
+ $('name').value=draft.agent.name;$('instructions').value=draft.agent.instructions;$('knowledge').value=draft.agent.knowledge[0];$('endpoint').value=draft.action.url;
+ if(document.activeElement!==$('code'))$('code').value=text;
+ $('gutter').textContent=$('code').value.split('\n').map((_,i)=>i+1).join('\n');renderOutline();
+ if(owner&&view==='visual'){renderInspector();drawGraph();}
+ renderChat();
+ if(fk)document.querySelector(`[data-focus-key="${CSS.escape(fk)}"]`)?.focus({preventScroll:true});
+}
+function switchView(next){if($('role').value!=='Owner')return;if(next==='visual'&&errors.length){render('Fix invalid JSON or explicitly discard it before switching. Your text is preserved.');return;}view=next;render('View changed; draft edits preserved.');}
+function editText(value,message){text=value;try{const c=JSON.parse(value);errors=validate(c);if(!errors.length)draft=c;}catch(e){errors=['Invalid JSON: '+e.message];}render(errors.length?'Invalid draft retained. Publication and visual switch are blocked.':message||'Valid JSON applied to shared draft.');}
+function change(mutate,message){const c=clone(draft);mutate(c);editText(JSON.stringify(c,null,2),message);if(errors.length){view='developer';render('Invalid edit preserved in JSON view for correction.');}}
+function visualEdit(){change(c=>{c.agent.name=$('name').value;c.agent.instructions=$('instructions').value;c.agent.knowledge=[$('knowledge').value];c.action.url=$('endpoint').value;},'Agent settings updated in the shared draft.');}
+function publish(){
+ if($('role').value!=='Owner'||errors.length||!dirty()||blockers(draft).length)return;
+ if(baseVersion!==version){openConflict();render('Publication rejected: v'+version+' was published after your draft started. Your edits are preserved.');return;}
+ published=clone(draft);basePublished=clone(draft);version++;baseVersion=version;
+ render('Published v'+version+'. Existing conversations keep their starting version; new ones use v'+version+'.');
+}
+
+/* ---------- canvas ---------- */
+const P=id=>live[id]||draft.workflow.positions[id];
+const add=(a,b)=>({x:a.x+b.x,y:a.y+b.y});
+const snap=(v,free)=>free?Math.round(v):Math.round(v/GRID)*GRID;
+function toWorld(cx,cy){const r=vp.getBoundingClientRect();return {x:(cx-r.left-cam.x)/cam.k,y:(cy-r.top-cam.y)/cam.k};}
+function rel(el,root){let x=el.offsetWidth/2,y=el.offsetHeight/2;while(el&&el!==root){x+=el.offsetLeft;y+=el.offsetTop;el=el.offsetParent;if(el){x+=el.clientLeft;y+=el.clientTop;}}return {x,y};}
+function drawGraph(){
+ live={};const nodes=$('nodes');nodes.replaceChildren(...draft.workflow.steps.map(nodeEl));
+ offsets={};sizes={};
+ for(const el of nodes.children){const id=el.dataset.id,o={in:rel(el.querySelector('.port-in'),el)};for(const port of el.querySelectorAll('.port-out'))o[port.dataset.key]=rel(port,el);offsets[id]=o;sizes[id]={w:el.offsetWidth,h:el.offsetHeight};}
+ drawWires();applyCamera();
+ if(animateRun){animateRun.forEach((id,i)=>{const el=nodes.querySelector(`[data-id="${id}"]`);if(el){el.style.animationDelay=i*170+'ms';el.classList.add('pulse');}});animateRun=null;}
+}
+function nodeEl(step){
+ const p=draft.workflow.positions[step.id],t=TYPES[step.type],entry=draft.workflow.entry===step.id;
+ const rows=OUTPUTS[step.type].map(k=>h('div',{className:'out'+(step[k]===null?' broken':'')},step[k]===null?'Unconnected · '+outLabel(step,k):outLabel(step,k),h('span',{className:'port-out',title:'Drag to connect · click to insert a step',style:'--k:'+(step[k]===null?'var(--rose)':KIND_COLOR[EDGE_KIND[k]]),data:{key:k}})));
+ if(step.type==='agent')rows.unshift(h('div',{className:'out none'},'↩ Replies to customer'));
+ if(step.type==='handoff')rows.push(h('div',{className:'out none'},'■ Ends in support queue'));
+ const node=h('div',{className:'flow-node'+(selected===step.id?' selected':''),tabIndex:0,role:'button','aria-label':`${t.name} step ${step.id}${entry?', start step':''}. Enter to edit, arrow keys to move, Delete to remove.`,style:`left:${p.x}px;top:${p.y}px`,data:{id:step.id,type:step.type,focusKey:'node:'+step.id}},
+  h('span',{className:'port-in'}),
+  h('div',{className:'node-head'},h('span',{className:'node-icon'},t.icon),h('div',{style:'min-width:0'},h('div',{className:'node-kind'},t.name),h('div',{className:'node-title'},title(step))),entry&&h('span',{className:'entry-badge'},'START')),
+  h('div',{className:'node-detail'},detail(step)),
+  h('div',{className:'node-outs'},rows));
+ node.onclick=e=>{if(!e.target.closest('.port-out'))select(step.id);};
+ node.onkeydown=e=>{
+  if(e.target!==node)return;
+  if(e.key==='Enter'||e.key===' '){e.preventDefault();select(step.id);return;}
+  if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();askDelete(step.id);return;}
+  const d={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];if(!d)return;
+  e.preventDefault();const s=e.shiftKey?100:GRID;
+  change(c=>{c.workflow.positions[step.id]={x:p.x+d[0]*s,y:p.y+d[1]*s};},'Moved '+step.id+' with the keyboard. Position saved to the draft.');
+  ensureVisible(step.id);
+ };
+ node.onpointerdown=e=>{
+  if(e.button!==0||e.target.closest('.port-out'))return;
+  e.stopPropagation();node.setPointerCapture(e.pointerId);
+  const sx=e.clientX,sy=e.clientY;let moved=false;
+  node.onpointermove=ev=>{
+   const dx=(ev.clientX-sx)/cam.k,dy=(ev.clientY-sy)/cam.k;if(!moved&&Math.hypot(dx,dy)<3)return;
+   moved=true;node.classList.add('dragging');
+   const q=live[step.id]={x:snap(p.x+dx,ev.altKey),y:snap(p.y+dy,ev.altKey)};
+   node.style.left=q.x+'px';node.style.top=q.y+'px';drawWires();drawMinimap();
+  };
+  node.onpointerup=node.onpointercancel=ev=>{
+   node.onpointermove=node.onpointerup=node.onpointercancel=null;if(!moved)return;
+   const q=live[step.id];delete live[step.id];
+   if(ev.type==='pointercancel'){node.classList.remove('dragging');node.style.left=p.x+'px';node.style.top=p.y+'px';drawWires();drawMinimap();$('status').textContent='Drag cancelled; position unchanged.';return;}
+   selected=step.id;selectedEdge=null;change(c=>{c.workflow.positions[step.id]=q;},'Moved '+step.id+'. Position saved to the draft.');
+  };
+ };
+ for(const port of node.querySelectorAll('.port-out'))portDrag(port,step,port.dataset.key);
+ return node;
+}
+function portDrag(port,step,k){
+ port.onpointerdown=e=>{
+  if(e.button!==0)return;e.stopPropagation();e.preventDefault();port.setPointerCapture(e.pointerId);
+  const sx=e.clientX,sy=e.clientY;let moved=false,target=null;
+  port.onpointermove=ev=>{
+   if(!moved&&Math.hypot(ev.clientX-sx,ev.clientY-sy)<4)return;moved=true;
+   pending={from:step.id,key:k,...toWorld(ev.clientX,ev.clientY)};
+   const el=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.flow-node'),id=el&&el.dataset.id!==step.id?el.dataset.id:null;
+   if(id!==target){document.querySelector('.drop-target')?.classList.remove('drop-target');target=id;if(id)el.classList.add('drop-target');}
+   drawWires();
+  };
+  port.onpointerup=port.onpointercancel=ev=>{
+   port.onpointermove=port.onpointerup=port.onpointercancel=null;const at=pending;pending=null;
+   document.querySelector('.drop-target')?.classList.remove('drop-target');
+   if(ev.type==='pointercancel'){drawWires();return;}
+   if(!moved){openPicker({from:step.id,key:k});return;}
+   if(target){selectedEdge=null;change(c=>{stepOf(c,step.id)[k]=target;},`Connected ${step.id} · ${outLabel(step,k)} → ${target}.`);return;}
+   drawWires();
+   if(document.elementFromPoint(ev.clientX,ev.clientY)?.closest('#canvasViewport'))openPicker({from:step.id,key:k,at:{x:snap(at.x),y:snap(at.y-22)}});
+  };
+ };
+}
+function drawWires(){
+ const svg=$('wires'),NS='http://www.w3.org/2000/svg';svg.replaceChildren();$('edgePop').hidden=true;
+ const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+ const curve=(a,b)=>{const dx=Math.max(50,Math.abs(b.x-a.x)/2);return `M${a.x} ${a.y}C${a.x+dx} ${a.y},${b.x-dx} ${b.y},${b.x} ${b.y}`;};
+ for(const s of draft.workflow.steps)for(const k of OUTPUTS[s.type]){
+  if(!s[k]||!offsets[s.id]||!offsets[s[k]])continue;
+  const a=add(P(s.id),offsets[s.id][k]),b=add(P(s[k]),offsets[s[k]].in),d=curve(a,b),m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+  const kind=EDGE_KIND[k],sel=selectedEdge?.from===s.id&&selectedEdge.key===k;
+  svg.append(el('path',{d,class:`edge ${kind}${sel?' selected':''}`}));
+  const hit=el('path',{d,class:'edge-hit'});
+  hit.onpointerdown=e=>{e.stopPropagation();selectedEdge={from:s.id,key:k};render(`Selected ${s.id} · ${outLabel(s,k)} → ${s[k]}. Press Delete or “Disconnect”.`);};
+  svg.append(hit);
+  if(EDGE_TEXT[k]){const t=el('text',{x:m.x,y:m.y+4,class:'edge-label '+kind,'text-anchor':'middle'});t.textContent=EDGE_TEXT[k];svg.append(t);}
+  if(sel)Object.assign($('edgePop'),{hidden:false}).style.cssText=`left:${m.x}px;top:${m.y}px`;
+ }
+ if(pending&&offsets[pending.from])svg.append(el('path',{d:curve(add(P(pending.from),offsets[pending.from][pending.key]),pending),class:'edge pending'}));
+}
+function select(id){selected=id;selectedEdge=null;render('Selected '+id+'.');}
+function disconnect(){const {from,key}=selectedEdge;selectedEdge=null;change(c=>{stepOf(c,from)[key]=null;},`Disconnected ${from} · ${outLabel(stepOf(draft,from),key)}. It is now unconnected and blocks publishing.`);}
+function applyCamera(){
+ $('world').style.transform=`translate(${cam.x}px,${cam.y}px) scale(${cam.k})`;
+ const g=GRID*cam.k;vp.style.backgroundSize=`${g}px ${g}px`;vp.style.backgroundPosition=`${cam.x}px ${cam.y}px`;
+ $('zoomLabel').textContent=Math.round(cam.k*100)+'%';drawMinimap();
+}
+function zoomAt(f,sx,sy){const k=Math.min(2,Math.max(.25,cam.k*f));cam.x=sx-(sx-cam.x)*k/cam.k;cam.y=sy-(sy-cam.y)*k/cam.k;cam.k=k;applyCamera();}
+function worldBounds(){let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const s of draft.workflow.steps){const p=P(s.id),z=sizes[s.id]||{w:224,h:120};x0=Math.min(x0,p.x);y0=Math.min(y0,p.y);x1=Math.max(x1,p.x+z.w);y1=Math.max(y1,p.y+z.h);}return {x:x0,y:y0,w:x1-x0,h:y1-y0};}
+// Visible canvas area, excluding the settings card when it is docked on the right.
+function usable(){const r=vp.getBoundingClientRect(),i=$('inspector').getBoundingClientRect();const w=!$('inspector').hidden&&i.left>r.left+r.width/2?i.left-r.left-12:r.width;return {w,h:r.height};}
+function fitView(){const r=vp.getBoundingClientRect();if(!r.width)return;const {w,h:ht}=usable(),b=worldBounds(),pad=60;const fit=Math.min(1,(w-pad*2)/b.w,(ht-pad*2)/b.h),k=Math.max(.5,fit);
+ // Below 50% nodes are unreadable: keep 50% and show the start of the flow instead.
+ cam={k,x:fit<.5?pad/2-b.x*k:(w-b.w*k)/2-b.x*k,y:(ht-b.h*k)/2-b.y*k};applyCamera();}
+function centerOn(id){const {w,h:ht}=usable(),p=P(id),z=sizes[id]||{w:224,h:120};cam.x=w/2-(p.x+z.w/2)*cam.k;cam.y=ht/2-(p.y+z.h/2)*cam.k;applyCamera();}
+function ensureVisible(id){const el=$('nodes').querySelector(`[data-id="${id}"]`);if(!el)return;const n=el.getBoundingClientRect(),r=vp.getBoundingClientRect();if(n.left<r.left||n.top<r.top||n.right>r.left+usable().w||n.bottom>r.bottom)centerOn(id);}
+function drawMinimap(){
+ const mm=$('minimap'),r=vp.getBoundingClientRect();if(!r.width||!draft)return;
+ const v={x:-cam.x/cam.k,y:-cam.y/cam.k,w:r.width/cam.k,h:r.height/cam.k},b=worldBounds(),pad=60;
+ const x0=Math.min(b.x,v.x)-pad,y0=Math.min(b.y,v.y)-pad,x1=Math.max(b.x+b.w,v.x+v.w)+pad,y1=Math.max(b.y+b.h,v.y+v.h)+pad;
+ mm.setAttribute('viewBox',`${x0} ${y0} ${x1-x0} ${y1-y0}`);
+ // Step IDs and types are validated (letters, digits, _ and -), so string markup is safe here.
+ mm.innerHTML=draft.workflow.steps.map(s=>{const p=P(s.id),z=sizes[s.id]||{w:224,h:120};return `<rect class="mm-node" data-type="${s.type}" x="${p.x}" y="${p.y}" width="${z.w}" height="${z.h}" rx="12"/>`;}).join('')+`<rect class="mm-view" x="${v.x}" y="${v.y}" width="${v.w}" height="${v.h}" rx="8" vector-effect="non-scaling-stroke"/>`;
+}
+$('minimap').onpointerdown=e=>{
+ const mm=$('minimap');mm.setPointerCapture(e.pointerId);
+ const go=ev=>{const m=mm.getScreenCTM().inverse(),pt=new DOMPoint(ev.clientX,ev.clientY).matrixTransform(m),r=vp.getBoundingClientRect();cam.x=r.width/2-pt.x*cam.k;cam.y=r.height/2-pt.y*cam.k;applyCamera();};
+ go(e);mm.onpointermove=go;mm.onpointerup=mm.onpointercancel=()=>{mm.onpointermove=mm.onpointerup=mm.onpointercancel=null;};
+};
+vp.onpointerdown=e=>{
+ if(e.button!==0&&e.button!==1)return;if(e.target.closest('.flow-node,#edgePop'))return;
+ vp.setPointerCapture(e.pointerId);vp.classList.add('panning');
+ const sx=e.clientX,sy=e.clientY,cx=cam.x,cy=cam.y;let moved=false;
+ vp.onpointermove=ev=>{if(Math.hypot(ev.clientX-sx,ev.clientY-sy)>3)moved=true;cam.x=cx+ev.clientX-sx;cam.y=cy+ev.clientY-sy;applyCamera();};
+ vp.onpointerup=vp.onpointercancel=()=>{vp.onpointermove=vp.onpointerup=vp.onpointercancel=null;vp.classList.remove('panning');if(!moved&&(selected||selectedEdge)){selected=null;selectedEdge=null;render('Selection cleared.');}};
+};
+vp.addEventListener('wheel',e=>{e.preventDefault();const r=vp.getBoundingClientRect();if(e.ctrlKey||e.metaKey)zoomAt(Math.exp(-Math.max(-50,Math.min(50,e.deltaY))*.006),e.clientX-r.left,e.clientY-r.top);else{cam.x-=e.deltaX;cam.y-=e.deltaY;applyCamera();}},{passive:false});
+// Tabbing to an off-screen node: undo the browser's scroll of the clipped viewport and pan the camera instead.
+vp.addEventListener('focusin',e=>{vp.scrollLeft=vp.scrollTop=0;if(!e.target.matches('.flow-node'))return;const n=e.target.getBoundingClientRect(),r=vp.getBoundingClientRect();if(n.right<r.left||n.left>r.left+usable().w||n.bottom<r.top||n.top>r.bottom)centerOn(e.target.dataset.id);});
+$('edgePop').onclick=()=>disconnect();
+$('zoomIn').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(1.2,r.width/2,r.height/2);};
+$('zoomOut').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(1/1.2,r.width/2,r.height/2);};
+$('fitView').onclick=fitView;
+$('fit').onclick=()=>{
+ // ponytail: longest-path columns, capped at one pass per step so loops terminate; a layout engine (dagre/elk) if graphs get large.
+ // Row ("lane") = parent's lane + output index, so the 2nd branch of a condition drops a row.
+ const steps=draft.workflow.steps,depth={},lane={};if(draft.workflow.entry){depth[draft.workflow.entry]=0;lane[draft.workflow.entry]=0;}
+ for(let pass=0;pass<steps.length;pass++)for(const s of steps)if(s.id in depth)OUTPUTS[s.type].forEach((k,i)=>{const t=s[k];if(!t)return;if(!(depth[t]>depth[s.id]))depth[t]=depth[s.id]+1;lane[t]=Math.max(lane[t]??0,lane[s.id]+i);});
+ const max=Math.max(-1,...Object.values(depth)),used=new Set();
+ change(c=>{for(const s of c.workflow.steps){const d=depth[s.id]??max+1;let l=lane[s.id]??0;while(used.has(d+':'+l))l++;used.add(d+':'+l);c.workflow.positions[s.id]={x:d*280,y:l*180};}},'Steps arranged left to right by depth.');
+ fitView();
+};
+
+/* ---------- inspector ---------- */
+function renderInspector(){
+ const step=draft.workflow.steps.find(s=>s.id===selected);$('inspector').hidden=!step;if(!step){selected=null;return;}
+ const t=TYPES[step.type];$('inspector').dataset.type=step.type;$('inspIcon').textContent=t.icon;$('selectedTitle').textContent=t.name;$('inspTitle').textContent=title(step);$('stepId').value=step.id;
+ $('knowledgeSettings').hidden=!['retrieval','agent'].includes(step.type);$('agentSettings').hidden=step.type!=='agent';$('actionSettings').hidden=step.type!=='http';$('handoffSettings').hidden=step.type!=='handoff';
+ $('entryRow').replaceChildren(draft.workflow.entry===step.id?h('span',{},h('span',{className:'entry-badge'},'START'),' Conversations begin here.'):h('button',{type:'button',data:{focusKey:'entry'},onclick:()=>change(c=>{c.workflow.entry=step.id;},step.id+' is now the start step.')},'Make this the start step'));
+ $('stepSettings').replaceChildren(...['field','equals'].filter(k=>k in step).map(k=>{const input=h('input',{id:'set-'+k,value:step[k],data:{focusKey:'set:'+k}});input.onchange=()=>updateStep(k,input.value);return h('div',{},h('label',{htmlFor:'set-'+k},k==='field'?'Field':'Equals'),input);}));
+ const outs=OUTPUTS[step.type];
+ $('connections').replaceChildren(...outs.map(k=>{
+  const sel=h('select',{id:'out-'+k,data:{focusKey:'out:'+k}},h('option',{value:''},'— unconnected —'),draft.workflow.steps.filter(s=>s.id!==step.id).map(s=>h('option',{value:s.id},s.id+' · '+TYPES[s.type].name)));
+  sel.value=step[k]??'';sel.onchange=()=>updateStep(k,sel.value||null);
+  return h('div',{className:'out-row'+(step[k]===null?' broken':'')},h('label',{htmlFor:'out-'+k},outLabel(step,k)),sel);
+ }),...(outs.length?[]:[h('p',{className:'help'},'This step ends automation.')]));
+ $('removeNode').disabled=draft.workflow.steps.length===1;
+}
+function updateStep(key,value){change(c=>{stepOf(c,selected)[key]=value;},value===null?`${selected} · ${key} disconnected.`:`${selected} · ${key} updated.`);}
+
+/* ---------- picker & delete ---------- */
+let pickCtx=null;
+$('pickList').append(...Object.entries(TYPES).map(([type,t])=>h('button',{type:'button',className:'pick',data:{type,search:(type+' '+t.name+' '+t.desc).toLowerCase()},onclick:()=>{const ctx=pickCtx;$('picker').close();addStep(type,ctx);}},h('span',{className:'node-icon'},t.icon),h('span',{},h('b',{},t.name),h('small',{},t.desc)))));
+function visiblePicks(){return [...$('pickList').children].filter(b=>!b.hidden);}
+function openPicker(ctx){
+ if($('role').value!=='Owner')return;pickCtx=ctx;$('pickerSearch').value='';
+ $('pickList').querySelectorAll('.pick').forEach(b=>b.hidden=false);
+ $('pickerTitle').textContent=ctx.from?`Add step after ${ctx.from} · ${outLabel(stepOf(draft,ctx.from),ctx.key)}`:'Add step';
+ $('picker').showModal();$('pickerSearch').focus();
+}
+$('pickerSearch').oninput=()=>{const q=$('pickerSearch').value.trim().toLowerCase();$('pickList').querySelectorAll('.pick').forEach(b=>b.hidden=!b.dataset.search.includes(q));};
+$('pickerSearch').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();visiblePicks()[0]?.click();}if(e.key==='ArrowDown'){e.preventDefault();visiblePicks()[0]?.focus();}};
+$('pickList').onkeydown=e=>{const list=visiblePicks(),i=list.indexOf(document.activeElement);if(e.key==='ArrowDown'){e.preventDefault();list[Math.min(list.length-1,i+1)]?.focus();}if(e.key==='ArrowUp'){e.preventDefault();i<=0?$('pickerSearch').focus():list[i-1].focus();}};
+function addStep(type,ctx){
+ let n=1,id;do id=type+'_'+n++;while(draft.workflow.steps.some(s=>s.id===id));
+ const extras={retrieval:{next:null},condition:{field:'intent',equals:'order_status',yes:null,fallback:null},http:{action:'order_status',next:null,failure:null},agent:{agent:'support',unsupported:null},handoff:{}}[type];
+ let pos=ctx.at;
+ if(!pos&&ctx.from){const p=draft.workflow.positions[ctx.from];pos={x:p.x+280,y:p.y+40};}
+ if(!pos){const r=vp.getBoundingClientRect(),c=toWorld(r.left+usable().w/2,r.top+r.height/2);pos={x:snap(c.x-112),y:snap(c.y-60)};}
+ const overlaps=q=>draft.workflow.steps.some(s=>{const o=draft.workflow.positions[s.id],z=sizes[s.id]||{w:224,h:120};return q.x<o.x+z.w&&q.x+224>o.x&&q.y<o.y+z.h&&q.y+120>o.y;});
+ if(!ctx.at)while(overlaps(pos))pos={x:pos.x,y:pos.y+160};
+ const old=ctx.from&&!ctx.at?stepOf(draft,ctx.from)[ctx.key]:null,carry=old&&OUTPUTS[type][0];
+ selected=id;selectedEdge=null;
+ change(c=>{const s={id,type,...extras};if(carry)s[carry]=old;if(ctx.from)stepOf(c,ctx.from)[ctx.key]=id;c.workflow.steps.push(s);c.workflow.positions[id]=pos;},
+  ctx.from?`Inserted ${id} after ${ctx.from}.`+(carry?` Its ${outLabel({type,...extras},carry)} output continues to ${old}.`:'')+(OUTPUTS[type].length>(carry?1:0)?' Connect its remaining outputs before publishing.':''):`Added ${id}.`+(OUTPUTS[type].length?' Its outputs are unconnected — connect them before publishing.':''));
+ ensureVisible(id);$('nodes').querySelector(`[data-id="${id}"]`)?.focus({preventScroll:true});
+}
+let pendingDelete=null;
+function askDelete(id){
+ if(draft.workflow.steps.length===1){render('A workflow needs at least one step.');return;}
+ const incoming=[];for(const s of draft.workflow.steps)for(const k of OUTPUTS[s.type])if(s[k]===id)incoming.push(`${s.id} · ${outLabel(s,k)}`);
+ if(draft.workflow.entry===id)incoming.unshift('Start step (the workflow will have no start)');
+ pendingDelete=id;$('deleteTitle').textContent=`Delete ${id}?`;
+ $('deleteSummary').textContent=incoming.length?`${incoming.length} connection${incoming.length>1?'s':''} will become unconnected:`:'No other step connects to it. Its own outgoing connections are removed with it.';
+ $('deleteList').replaceChildren(...incoming.map(t=>h('li',{},t)));$('deleteList').hidden=!incoming.length;
+ $('deleteDialog').showModal();
+}
+$('confirmDelete').onclick=()=>{
+ const id=pendingDelete;$('deleteDialog').close();selected=null;selectedEdge=null;
+ const n=draft.workflow.steps.filter(s=>s.id!==id).flatMap(s=>LINK_KEYS.filter(k=>s[k]===id)).length+(draft.workflow.entry===id);
+ change(c=>{c.workflow.steps=c.workflow.steps.filter(s=>s.id!==id);delete c.workflow.positions[id];for(const s of c.workflow.steps)for(const k of LINK_KEYS)if(s[k]===id)s[k]=null;if(c.workflow.entry===id)c.workflow.entry=null;},
+  `Deleted ${id}.`+(n?` ${n} connection${n>1?'s are':' is'} now unconnected — publishing is blocked until reconnected.`:''));
+};
+$('removeNode').onclick=()=>askDelete(selected);
+document.querySelectorAll('.dlg-cancel').forEach(b=>b.onclick=()=>b.closest('dialog').close());
+
+/* ---------- JSON view ---------- */
+function errorOffset(){const m=errors[0]?.match(/position (\d+)/);return m?+m[1]:null;}
+function jumpTo(offset,len){if(offset==null||offset<0)return;const c=$('code');c.focus();c.setSelectionRange(offset,offset+len);const line=c.value.slice(0,offset).split('\n').length-1;c.scrollTop=Math.max(0,(line-4)*parseFloat(getComputedStyle(c).lineHeight));$('gutter').scrollTop=c.scrollTop;}
+function renderOutline(){
+ // ponytail: regex outline over the raw text so it still works while the JSON is invalid; assumes 2-space top-level indent.
+ const items=[];let m;const top=/^ {2}"(\w+)":/gm,steps=/"id"\s*:\s*"([^"]+)"\s*,\s*"type"/g;
+ while((m=top.exec(text)))items.push({label:m[1],at:m.index+2,len:m[1].length+2});
+ while((m=steps.exec(text)))items.push({label:'step · '+m[1],at:m.index,len:m[0].length,sub:true});
+ items.sort((a,b)=>a.at-b.at);
+ $('outline').replaceChildren(h('h3',{},'Sections'),...items.map(i=>h('button',{type:'button',className:i.sub?'sub':'',onclick:()=>jumpTo(i.at,i.len)},i.label)));
+}
+$('code').oninput=()=>editText($('code').value);
+$('code').onscroll=()=>$('gutter').scrollTop=$('code').scrollTop;
+$('gotoError').onclick=()=>jumpTo(errorOffset(),1);
+$('discard').onclick=()=>{text=JSON.stringify(draft,null,2);errors=[];$('code').blur();render('Invalid text discarded; last valid draft restored.');};
+
+/* ---------- conflicts ---------- */
+const short=v=>v===undefined?'—':v.length>70?v.slice(0,67)+'…':v;
+function openConflict(){
+ const rows=diff3(basePublished,draft,published),clash=rows.filter(r=>r.local&&r.remote&&r.mine!==r.theirs);
+ $('conflictTitle').textContent=`v${version} was published while you were editing`;
+ $('conflictIntro').textContent=`Your draft started from v${baseVersion}. Nothing is lost until you choose; “Decide later” keeps your draft as it is.`;
+ $('thBase').textContent='v'+baseVersion+' (your base)';$('thTheirs').textContent='Latest v'+version;
+ $('diffRows').replaceChildren(...rows.map(r=>{const both=r.local&&r.remote&&r.mine!==r.theirs;return h('tr',{className:both?'clash':''},h('td',{},r.path),h('td',{},short(r.base)),h('td',{className:r.local?'win':''},short(r.mine)),h('td',{className:both?'lose':''},short(r.theirs)),h('td',{},both?'Both · yours replaces theirs':r.local&&r.remote?'Both · same value':r.local?'You':'Other Owner'));}));
+ $('overwriteNote').textContent=errors.length?'Fix or discard invalid JSON before applying your changes.':clash.length?`Applying your changes keeps every other v${version} change but replaces its newer value for: ${clash.map(r=>r.path).join(', ')}.`:`No overlapping fields: applying keeps every change from both versions.`;
+ $('rebase').textContent=`Apply my changes onto v${version}`;$('rebase').disabled=errors.length>0;
+ $('reloadRemote').textContent=`Discard my draft, load v${version}`;delete $('reloadRemote').dataset.armed;
+ $('conflictDialog').showModal();
+}
+$('conflictPill').onclick=openConflict;
+$('rebase').onclick=()=>{const merged=merge(basePublished,draft,published);$('conflictDialog').close();baseVersion=version;basePublished=clone(published);editText(JSON.stringify(merged,null,2),`Your changes were applied onto v${version}. Review, then publish.`);};
+$('reloadRemote').onclick=()=>{
+ const b=$('reloadRemote');if(!b.dataset.armed){b.dataset.armed='1';b.textContent='Click again to discard your draft';return;}
+ $('conflictDialog').close();draft=clone(published);basePublished=clone(published);text=JSON.stringify(draft,null,2);errors=[];baseVersion=version;render(`Loaded v${version}. Your previous draft was discarded.`);
+};
+$('remoteUpdate').onclick=()=>{published=clone(published);published.agent.name='Order support (updated by another Owner)';version++;$('protoMenu').open=false;render('Another Owner published v'+version+'. Your draft is unchanged; try publishing to see conflict handling.');};
+
+/* ---------- preview chat ---------- */
+function simulate(kind){
+ if($('role').value!=='Owner')return;
+ if(kind==='start'||!conversation)conversation={version,config:clone(published),messages:[],paused:false};
+ const log=conversation.messages;log.forEach(m=>m.open=false);
+ log.push({role:'customer',text:{start:'Where is my order PB-1042?',continue:'Any update on PB-1042?',fail:'Where is my order PB-1042?',handoff:'Can I talk to a person?'}[kind]});
+ $('testPanel').hidden=false;
+ if(conversation.paused){log.push({role:'system',text:'Human takeover active · automation paused. The message waits for the assignee.'});render('Human takeover: automated execution remains paused.');return;}
+ const rows=['SIMULATED · configuration v'+conversation.version,'Customer identity: [redacted] · authorization: allowed'];
+ const config=conversation.config,visited=[];let current=config.workflow.entry,looked=false,ended=null;
+ for(let count=0;current&&count<20;count++){
+  const step=config.workflow.steps.find(s=>s.id===current);if(!step){ended='handoff';rows.push('Missing step → support queue; automation paused.');break;}
+  visited.push({id:step.id,type:step.type});rows.push(step.id+' · '+step.type);
+  if(kind==='handoff'){ended='handoff';rows.push('Customer requested human help → support queue; automation paused.');break;}
+  if(step.type==='retrieval')current=step.next;
+  else if(step.type==='condition')current=step.field==='intent'&&step.equals==='order_status'?step.yes:step.fallback;
+  else if(step.type==='http'){rows.push('GET '+config.action.url+' · credential: [redacted]');if(kind==='fail'){rows.push('15-second timeout → one retry → timeout → failure path.');current=step.failure;}else{rows.push('Fixture result: {status: "in production"}');looked=true;current=step.next;}}
+  else if(step.type==='agent'){ended='reply';rows.push('Agent: '+config.agent.name+' → final customer reply');current=null;}
+  else {ended='handoff';rows.push('Support queue; automation paused.');current=null;}
+  if(count===19&&current){ended='handoff';rows.push('20-step limit reached → support queue; automation paused.');}
+ }
+ if(ended==='handoff')conversation.paused=true;
+ log.push({role:'agent',name:config.agent.name,version:conversation.version,open:true,trace:{rows,visited},text:ended==='reply'?(looked?'Order PB-1042 is in production. I’ll update you here as soon as it ships.':'Here’s what our policies say about that. Anything else I can help with?'):'I’m connecting you with our support team — someone will reply here shortly.'});
+ if(ended==='handoff')log.push({role:'system',text:'Handed to support queue · automation paused'});
+ animateRun=visited.map(v=>v.id);
+ render(`Simulated run on v${conversation.version}. No API request was sent.`);
+}
+function renderChat(){
+ const log=$('chatLog');
+ if(!conversation){log.replaceChildren(h('p',{className:'empty'},'Pick a customer message below to start a simulated conversation on the latest published version.'));$('pinNote').hidden=true;chatCount=0;return;}
+ const stale=conversation.version!==version,differs=JSON.stringify(conversation.config)!==JSON.stringify(draft);
+ $('pinNote').hidden=!stale&&!differs;
+ $('pinNote').textContent=`This conversation is pinned to v${conversation.version}.`+(stale?` v${version} is published now — start a new conversation to use it.`:'')+(differs?' The canvas shows your current draft, which differs from what ran.':'');
+ log.replaceChildren(...conversation.messages.map(m=>{
+  if(m.role!=='agent')return h('div',{className:'msg '+m.role},m.text);
+  const steps=m.trace.visited.map(v=>{const exists=draft.workflow.steps.some(s=>s.id===v.id);return h('button',{type:'button',className:exists?'':'gone',onclick:()=>locateStep(v.id,m.version)},h('span',{},v.id+' · '+v.type),h('span',{className:'tag'},exists?'locate':'not in draft'));});
+  const d=h('details',{className:'trace',open:m.open},h('summary',{},`Execution trace · v${m.version} · ${m.trace.visited.length} steps`),h('div',{className:'trace-steps'},steps),h('pre',{},m.trace.rows.join('\n')));
+  d.ontoggle=()=>{m.open=d.open;};
+  return h('div',{className:'msg agent'},h('div',{className:'msg-meta'},m.name,h('span',{className:'tag'},'v'+m.version)),m.text,d);
+ }));
+ if(conversation.messages.length!==chatCount){chatCount=conversation.messages.length;log.scrollTop=log.scrollHeight;}
+}
+function locateStep(id,ver){
+ if(!draft.workflow.steps.some(s=>s.id===id)){render(`This run executed v${ver}; step “${id}” no longer exists in the current draft. Configuration unchanged.`);return;}
+ selected=id;selectedEdge=null;const same=JSON.stringify(conversation.config)===JSON.stringify(draft);
+ render(`Located ${id} in the current draft. This run executed v${ver}${same?'':' and the draft has changed since, so settings may differ'}. Configuration unchanged.`);
+ if(matchMedia('(max-width:720px)').matches){$('testPanel').hidden=true;render();}
+ if(view==='developer')jumpTo($('code').value.search(new RegExp(`"id"\\s*:\\s*"${id}"`)),id.length+8);else centerOn(id);
+}
+
+/* ---------- wiring ---------- */
+$('visualTab').onclick=()=>switchView('visual');$('developerTab').onclick=()=>switchView('developer');
+for(const id of ['name','instructions','knowledge','endpoint'])$(id).onchange=visualEdit;
+$('publish').onclick=publish;$('reset').onclick=()=>{$('protoMenu').open=false;reset();};
+$('role').onchange=()=>render($('role').value==='Support'?'Support cannot access configuration or traces.':'Owner access restored; draft retained.');
+$('motion').onchange=()=>document.documentElement.classList.toggle('reduce-motion',$('motion').checked);
+$('run').onclick=()=>simulate('start');$('continue').onclick=()=>simulate('continue');$('fail').onclick=()=>simulate('fail');$('handoff').onclick=()=>simulate('handoff');
+$('testToggle').onclick=()=>{$('testPanel').hidden=!$('testPanel').hidden;render();};
+$('closeTest').onclick=()=>{$('testPanel').hidden=true;render();$('testToggle').focus();};
+$('closeInspector').onclick=()=>{const id=selected;selected=null;render('Step settings closed.');$('nodes').querySelector(`[data-id="${id}"]`)?.focus({preventScroll:true});};
+$('addNode').onclick=()=>openPicker({});
+$('issues').onclick=()=>{const b=blockers(draft).find(b=>b.id);if(!b){render('Choose a start step: select a step and use “Make this the start step”.');return;}select(b.id);centerOn(b.id);};
+document.addEventListener('keydown',e=>{
+ if(e.defaultPrevented||e.target.closest?.('input,textarea,select')||document.querySelector('dialog[open]'))return;
+ if($('role').value!=='Owner'||view!=='visual')return;
+ if(e.key==='/'||(e.key.toLowerCase()==='k'&&(e.metaKey||e.ctrlKey))){e.preventDefault();openPicker({});}
+ else if((e.key==='Delete'||e.key==='Backspace')&&selectedEdge){e.preventDefault();disconnect();}
+ else if(e.key==='Escape'&&(selected||selectedEdge)){selected=null;selectedEdge=null;render('Selection cleared.');}
+});
+const scenarios={
+ roundtrip:[['Edit the agent name visually.',()=>{$('name').value='Delivery helper';visualEdit();select('reply');}],['Switch to JSON: the new name remains.',()=>switchView('developer')],['Switch back: no edits lost.',()=>switchView('visual')]],
+ invalid:[['Open JSON and introduce a syntax error.',()=>{view='developer';editText('{ broken');}],['Attempt visual switch: blocked, text preserved.',()=>switchView('visual')],['Explicitly discard invalid text.',()=>{$('discard').click();switchView('visual');}]],
+ publication:[['Start a conversation on version 1.',()=>simulate('start')],['Rename the agent and publish version 2.',()=>{$('name').value='Delivery helper';visualEdit();publish();}],['Continue: version 1 still runs.',()=>simulate('continue')],['Start new: version 2 runs.',()=>simulate('start')]],
+ conflict:[['Edit the agent name and instructions locally.',()=>{$('name').value='Delivery helper';$('instructions').value='Confirm the order number first, then answer from assigned knowledge.';visualEdit();}],['Another Owner publishes v2 meanwhile.',()=>$('remoteUpdate').click()],['Publish: rejected; comparison opens, draft intact.',()=>publish()],['Apply your changes onto v2, then publish v3.',()=>{$('rebase').click();publish();}]],
+ access:[['Switch to Support: configuration and traces disappear. Restore Owner via PROTOTYPE ▾.',()=>{$('role').value='Support';$('role').onchange();}]]
+};
+document.querySelectorAll('[data-scenario]').forEach(b=>b.onclick=()=>{reset();guideSteps=scenarios[b.dataset.scenario];guideIndex=0;document.querySelectorAll('[data-scenario]').forEach(t=>t.setAttribute('aria-pressed',t===b));$('next').hidden=false;$('guide').textContent=guideSteps[0][0];});
+$('next').onclick=()=>{guideSteps[guideIndex][1]();guideIndex++;$('next').hidden=guideIndex===guideSteps.length;$('guide').textContent=guideIndex===guideSteps.length?'Walkthrough complete. Continue free play or choose another.':guideSteps[guideIndex][0];};
+reset();
+// One runnable check: open with ?check=1.
+if(new URLSearchParams(location.search).has('check')){
+ const ok=(c,m)=>{if(!c)throw Error(m);};
+ const changed=clone(initial);changed.agent.name='Changed';ok(!validate(changed).length,'Supported edit rejected');
+ changed.action.requiresCustomerAuthorization=false;ok(validate(changed).length,'Authorization bypass accepted');
+ const open=clone(initial);open.workflow.steps[0].next=null;ok(!validate(open).length&&blockers(open).length===1,'Unconnected output must be valid but block publication');
+ const far=clone(initial);far.workflow.positions.retrieve={x:-5000,y:9000};ok(!validate(far).length,'Canvas positions must be unbounded');
+ const mine=clone(initial),theirs=clone(initial);mine.agent.instructions='Local';theirs.agent.name='Remote';const m=merge(initial,mine,theirs);ok(m.agent.name==='Remote'&&m.agent.instructions==='Local','Merge lost a change');
+ console.info('Prototype checks passed');
+}
+</script>
+</body>
+</html>
