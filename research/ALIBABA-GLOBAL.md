@@ -1,5 +1,8 @@
 # Alibaba Global Qwen fallback and embedding boundary
 
+Final selection: [ALIBABA-SELECTED-ENDPOINT.md](ALIBABA-SELECTED-ENDPOINT.md) records the exact Qwen Cloud endpoint chosen by the operator and supersedes earlier endpoint recommendations. This file is informational comparison.
+
+
 Reviewed 2026-10-01 for [Verify Alibaba Global Qwen fallback and embedding integration](https://github.com/taufiq0205/custom-bot/issues/10). Supersedes the Singapore recommendation after the operator explicitly chose **Global** deployment. [ALIBABA-SINGAPORE.md](ALIBABA-SINGAPORE.md) remains historical comparison, not the selected endpoint. Documentation only: no account inspection, authenticated calls, installation or runtime testing.
 
 ## Global configuration
