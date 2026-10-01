@@ -1,5 +1,8 @@
 # Alibaba Singapore Qwen fallback and embeddings
 
+Final selection: [ALIBABA-SELECTED-ENDPOINT.md](ALIBABA-SELECTED-ENDPOINT.md) records the exact Qwen Cloud endpoint chosen by the operator and supersedes earlier endpoint recommendations. This file is informational comparison.
+
+
 Historical comparison: the operator subsequently chose Global deployment. [ALIBABA-GLOBAL.md](ALIBABA-GLOBAL.md) supersedes this Singapore endpoint/embedding recommendation.
 
 Reviewed 2026-10-01 for [Verify Alibaba Singapore Qwen fallback and embedding integration](https://github.com/taufiq0205/custom-bot/issues/10). Primary official documentation only; no account inspection, authenticated API calls, installations, model tests, pricing comparison, or legal review. Earlier four-provider findings remain in [PROVIDER-INTEGRATIONS.md](PROVIDER-INTEGRATIONS.md).
