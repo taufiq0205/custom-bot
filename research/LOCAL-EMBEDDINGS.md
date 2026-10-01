@@ -1,6 +1,6 @@
 # Local embeddings for the English-only pilot
 
-Reviewed 2026-10-02. Research for [issue #11](https://github.com/taufiq0205/custom-bot/issues/11). The user's English-only pilot supersedes the initial multilingual comparison. These are deployment candidates, not an accepted model choice or measured results. No packages, weights, or runtime APIs were exercised.
+Reviewed 2026-10-02. Research for [Choose an open embedding model for local Mac retrieval](https://github.com/taufiq0205/custom-bot/issues/11). The user's English-only pilot supersedes the initial multilingual comparison. These are deployment candidates, not an accepted model choice or measured results. No packages, weights, or runtime APIs were exercised.
 
 ## Recommendation
 
