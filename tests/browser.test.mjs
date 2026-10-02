@@ -12,7 +12,7 @@ test('browser: register, verify, sign in, create Owner Business, recover, sign o
   await page.getByLabel('Email',{exact:true}).fill(email);
   await page.getByLabel('Password',{exact:true}).fill('Browser-password-928!');
   await page.getByRole('button',{name:'Create account',exact:true}).click();
-  await page.getByText('Check your mail for a verification code.').waitFor();
+  await page.getByRole('status').filter({hasText:'Already registered?'}).waitFor();
   await page.getByLabel('One-time code').fill(await otp(email,'email-verification'));
   await page.getByRole('button',{name:'Verify email',exact:true}).click();
   await page.getByText('Email verified. Sign in to continue.').waitFor();

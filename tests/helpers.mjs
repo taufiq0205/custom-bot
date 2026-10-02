@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 export const base = process.env.APP_URL || 'http://localhost:3100';
+const mailBase = process.env.MAIL_URL || 'http://localhost:8025';
 export async function client() {
   let cookie = '';
   return async (path, body, options = {}) => {
@@ -22,10 +23,10 @@ export async function client() {
 }
 export async function otp(email, type) {
   for (let attempt = 0; attempt < 30; attempt++) {
-    const listing = await fetch('http://localhost:8025/api/v1/messages').then(r => r.json());
+    const listing = await fetch(mailBase+'/api/v1/messages').then(r => r.json());
     const message = listing.messages.find(m => m.To.some(t => t.Address === email) && m.Subject === type);
     if (message) {
-      const detail = await fetch(`http://localhost:8025/api/v1/message/${message.ID}`).then(r => r.json());
+      const detail = await fetch(`${mailBase}/api/v1/message/${message.ID}`).then(r => r.json());
       return detail.Text.match(/\b\d{8}\b/)[0];
     }
     await new Promise(r => setTimeout(r, 100));
