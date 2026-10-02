@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Custom Bot — Operator</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/ui.js" defer>
+</script>
+<body>
+<main>
+<h1>Operator access</h1>
+<p>Local development. Verification and recovery codes arrive in your configured mail transport.</p>
+<form id="account">
+<label>Name <input name="name" autocomplete="name" value="Operator" required>
+</label>
+<label>Email <input name="email" type="email" autocomplete="username" required>
+</label>
+<label>Password <input name="password" type="password" autocomplete="current-password" minlength="12">
+</label>
+<div>
+<button name="action" value="signup">Create account</button>
+<button name="action" value="signin">Sign in</button>
+<button name="action" value="recover">Recover access</button>
+<button name="action" value="resend">Resend verification</button>
+</div>
+<label>One-time code <input name="otp" inputmode="numeric" autocomplete="one-time-code">
+</label>
+<div>
+<button name="action" value="verify">Verify email</button>
+<button name="action" value="reset">Reset password</button>
+</div>
+</form>
+<p id="status" role="status" aria-live="polite">
+</p>
+<section id="workspace" hidden>
+<h2>Your Businesses</h2>
+<ul id="businesses">
+</ul>
+<form id="business">
+<label>Business name <input name="name" required maxlength="120">
+</label>
+<button>Create Business as Owner</button>
+</form>
+<button id="signout">Sign out</button>
+</section>
+</main>
+</body>
+</html>

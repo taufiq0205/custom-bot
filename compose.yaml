@@ -1,0 +1,77 @@
+name: custom-bot
+x-app-env: &app-env
+  APP_MODE: ${APP_MODE:-local}
+  APP_URL: ${APP_URL:-http://localhost:3100}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
+  DATABASE_URL: postgres://custom_bot:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/custom_bot
+  SMTP_HOST: ${SMTP_HOST:-mail}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  MAIL_FROM: ${MAIL_FROM:-support@example.test}
+services:
+  db:
+    image: pgvector/pgvector:0.8.2-pg17-bookworm@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
+    environment:
+      POSTGRES_USER: custom_bot
+      POSTGRES_DB: custom_bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes: [database:/var/lib/postgresql/data]
+    networks: [internal]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U custom_bot -d custom_bot]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  mail:
+    profiles: [local]
+    image: axllent/mailpit:v1.29.3@sha256:fdaf09bd71dc0829ce8b62e4bfb5180bc5c0674c3e444283fc90681853f5a3c0
+    ports: [127.0.0.1:8025:8025]
+    networks: [internal, web]
+  migrate:
+    build: .
+    command: [node, dist/migrate.js]
+    environment: *app-env
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [internal]
+  app:
+    build: .
+    environment: *app-env
+    ports: [127.0.0.1:3100:3000]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      worker: {condition: service_started}
+    networks: [internal, web]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+  worker:
+    build: worker
+    environment:
+      DATABASE_URL: postgres://custom_bot:${POSTGRES_PASSWORD}@db:5432/custom_bot
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    networks: [internal]
+    healthcheck:
+      test: [CMD, python, -c, "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL']); assert c.execute(\"SELECT 1 FROM worker_health WHERE id='worker' AND heartbeat>now()-interval '10 seconds'\").fetchone()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  seed:
+    profiles: [seed]
+    build: .
+    command: [node, dist/seed.js]
+    environment:
+      <<: *app-env
+      SEED_OWNER_EMAIL: ${SEED_OWNER_EMAIL:-}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    networks: [internal]
+networks:
+  internal: {internal: true}
+  web: {}
+volumes:
+  database: {}

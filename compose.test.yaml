@@ -1,0 +1,6 @@
+# Test-only short expiry; no test routes or alternate authorization.
+services:
+  app:
+    environment:
+      APP_MODE: test
+      TEST_OTP_TTL: '8'
