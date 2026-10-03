@@ -181,8 +181,11 @@ test('Website chat: worker leases, crash and late results without replay, restar
   assert.equal((await connectedSession.request(connectedSession.path+'/messages',{client_submission_id:'connected-turn-1',text:'Is this real?'})).status,202);
   const unavailable=await settled(connectedSession);
   assert.equal(unavailable.messages[0].turn_state,'failed');
-  assert.deepEqual(unavailable.messages.slice(1).map(m=>[m.author,m.simulated]),[['system',false]]);
+  // The failure also hands the conversation to support (slice #18).
+  assert.deepEqual(unavailable.messages.slice(1).map(m=>[m.author,m.simulated]),[['system',false],['system',false]]);
   assert.match(unavailable.messages[1].text,/connected generation is unavailable/);
+  assert.match(unavailable.messages[2].text,/^Waiting for support/);
+  assert.equal(unavailable.control_state,'waiting-for-support');
   const workerEnv=compose('exec','-T','worker','env');
   for(const name of ['DEEPSEEK_API_KEY','DASHSCOPE_API_KEY','TYPESAFE_API_KEY'])assert.equal(workerEnv.includes(name),false);
   // Test job controls are refused outside test mode.

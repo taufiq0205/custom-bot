@@ -72,6 +72,25 @@
 <ul id="config-issues"></ul>
 </section>
 </section>
+<section id="inbox-panel" hidden>
+<h2 id="inbox-title">Inbox</h2>
+<p id="inbox-availability"></p>
+<button id="inbox-toggle">Set Available</button>
+<p id="inbox-team"></p>
+<ul id="inbox-list"></ul>
+<section id="inbox-conversation" hidden>
+<h3>Conversation</h3>
+<p id="inbox-meta"></p>
+<ol id="inbox-messages" role="log" aria-live="polite"></ol>
+<button id="inbox-claim">Claim</button>
+<button id="inbox-resolve">Resolve</button>
+<button id="inbox-resume">Return to automated assistant</button>
+<label>Assign to <select id="inbox-assignee"></select></label>
+<button id="inbox-reassign">Reassign</button>
+<label>Reply <textarea id="inbox-reply" rows="3" maxlength="2000"></textarea></label>
+<button id="inbox-send">Send reply</button>
+</section>
+</section>
 <button id="signout">Sign out</button>
 </section>
 </main>

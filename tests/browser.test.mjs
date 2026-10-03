@@ -322,3 +322,71 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
 });
+test('browser: Customer asks for a person; Support claims and replies; reassignment rejects the former assignee but keeps the draft; resolution',async()=>{
+ const {operator,invitationToken}=await import('./helpers.mjs');
+ const {createServer}=await import('node:http');
+ const owner=await operator('browser-inbox-owner'),support=await operator('browser-inbox-support');
+ const business=(await owner.request('/api/businesses',{name:'Browser Inbox'})).data;
+ assert.equal((await owner.request(`/api/businesses/${business.id}/invitations`,{email:support.email,role:'Support'})).status,201);
+ assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
+ const site=createServer((req,res)=>{res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop</title><h1>Shop</h1><script src="${base}/widget.js" data-business="${business.id}" defer></script>`);});
+ await new Promise(r=>site.listen(0,'127.0.0.1',r));
+ const approved=`http://127.0.0.1:${site.address().port}`;
+ assert.equal((await owner.request(`/api/businesses/${business.id}/website-origins`,{origin:approved,approved:true})).status,200);
+ const browser=await chromium.launch();
+ const errors=[];
+ const page=async()=>{const p=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();p.on('pageerror',e=>errors.push(e.message));return p;};
+ const signIn=async(p,a)=>{await p.goto(base);await p.getByLabel('Email',{exact:true}).fill(a.email);await p.getByLabel('Password',{exact:true}).fill(a.password);await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.getByText('Signed in.',{exact:true}).waitFor();};
+ const openConversation=async p=>{await p.getByRole('button',{name:'Open inbox Browser Inbox'}).click();await p.getByRole('button',{name:/^Open conversation /}).click();await p.locator('#inbox-meta').waitFor();};
+ try {
+  const shopper=await page();
+  await shopper.goto(approved);
+  const chat=shopper.getByRole('log');
+  await shopper.getByLabel('Message').fill('I need help with a return');
+  await shopper.getByRole('button',{name:'Send',exact:true}).click();
+  await chat.getByText(/^Simulated assistant:/).waitFor();
+  await shopper.getByRole('button',{name:'Talk to a person'}).click();
+  await chat.getByText(/^Notice: Waiting for support\./).waitFor();
+  assert.doesNotMatch(await chat.textContent(),/\d+ ?(second|minute|hour)/i,'No response-time promise');
+  assert.equal(await shopper.getByRole('button',{name:'Talk to a person'}).isVisible(),false);
+
+  const supportPage=await page();
+  await signIn(supportPage,support);
+  await openConversation(supportPage);
+  await supportPage.getByText(/Waiting for support\. Reason: customer-request\./).waitFor();
+  await supportPage.getByRole('log').getByText('Customer: I need help with a return',{exact:true}).waitFor();
+  await supportPage.getByRole('button',{name:'Claim',exact:true}).click();
+  await supportPage.getByText('Conversation claimed. You are its assignee.',{exact:true}).waitFor();
+  await chat.getByText('Notice: Support joined.',{exact:true}).waitFor();
+  await supportPage.getByLabel('Reply').fill('Happy to help with your return.');
+  await supportPage.getByRole('button',{name:'Send reply',exact:true}).click();
+  await supportPage.getByText('Reply sent.',{exact:true}).waitFor();
+  assert.equal(await supportPage.getByLabel('Reply').inputValue(),'');
+  await chat.getByText('Support: Happy to help with your return.',{exact:true}).waitFor();
+  // Customer messages reach support and start no automated reply.
+  await shopper.getByLabel('Message').fill('Thanks, it is order 1001');
+  await shopper.getByRole('button',{name:'Send',exact:true}).click();
+  await supportPage.getByRole('log').getByText('Customer: Thanks, it is order 1001',{exact:true}).waitFor();
+  assert.equal(await chat.getByText(/^Simulated assistant:/).count(),1);
+
+  // Reassignment while Support holds a draft: the send is rejected and the draft stays.
+  await supportPage.getByLabel('Reply').fill('Draft that must survive');
+  const ownerPage=await page();
+  await signIn(ownerPage,owner);
+  await openConversation(ownerPage);
+  await ownerPage.getByLabel('Assign to').selectOption({label:`${owner.email} (Owner)`});
+  await ownerPage.getByRole('button',{name:'Reassign',exact:true}).click();
+  await ownerPage.getByText('Conversation reassigned.',{exact:true}).waitFor();
+  await supportPage.getByRole('button',{name:'Send reply',exact:true}).click();
+  await supportPage.getByText(/^Not sent; your reply is kept\./).waitFor();
+  assert.equal(await supportPage.getByLabel('Reply').inputValue(),'Draft that must survive');
+  assert.equal(await chat.getByText('Support: Draft that must survive').count(),0);
+  await supportPage.getByText(new RegExp(`assigned to ${owner.email.replace(/[.+]/g,'\\$&')}`)).waitFor();
+
+  await ownerPage.getByRole('button',{name:'Resolve',exact:true}).click();
+  await ownerPage.getByText('Conversation resolved.',{exact:true}).waitFor();
+  await chat.getByText(/^Notice: Conversation resolved\./).waitFor();
+  for(const p of [shopper,supportPage,ownerPage])assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.deepEqual(errors,[]);
+ } finally {await browser.close();site.close();}
+});

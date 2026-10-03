@@ -16,6 +16,14 @@ export async function body(req:IncomingMessage,limit=4096) {
   try {const value=JSON.parse(raw);if(!value||Array.isArray(value)||typeof value!=='object')throw 0;return value;}
   catch {throw new Failure(400,'Invalid JSON object');}
 }
+// Chat messages and Operator replies share one submission/text contract.
+export function message(input:Record<string,unknown>,extra:string[]=[]) {
+  keys(input,[...extra,'client_submission_id','text']);
+  const submission=input.client_submission_id,text=typeof input.text==='string'?input.text.trim():null;
+  if(typeof submission!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(submission)||!text||text.length>2000)
+    throw new Failure(400,`Provide ${extra.map(f=>f+', ').join('')}client_submission_id (8–100 letters, digits, - or _) and text (1–2000 characters)`);
+  return {submission,text};
+}
 export function keys(value:Record<string,unknown>,expected:string[]) {
   if(Object.keys(value).length!==expected.length || expected.some(k=>!(k in value))) throw new Failure(400,'Unexpected or missing fields');
 }
@@ -63,7 +71,7 @@ export async function memberships(req:IncomingMessage,path:string,user:{id:strin
       const existing=await client.query('SELECT revision FROM memberships WHERE business_id=$1 AND operator_id=$2',[business,target]);
       if(!existing.rowCount)throw new Failure(404,'Membership not found');
       if(existing.rows[0].revision!==input.revision)throw new Failure(409,'Membership changed; reload before updating');
-      result=await client.query('UPDATE memberships SET role=$3,active=$4,revision=revision+1 WHERE business_id=$1 AND operator_id=$2 RETURNING operator_id,role,active,revision',[business,target,input.role,input.active]);
+      result=await client.query('UPDATE memberships SET role=$3,active=$4,available=available AND $4,revision=revision+1 WHERE business_id=$1 AND operator_id=$2 RETURNING operator_id,role,active,revision',[business,target,input.role,input.active]);
       if(!input.active || input.role!=='Owner')await client.query('UPDATE invitations SET revoked_at=clock_timestamp() WHERE business_id=$1 AND inviter_id=$2 AND consumed_at IS NULL AND revoked_at IS NULL',[business,target]);
       if(!input.active)await client.query('UPDATE invitations SET revoked_at=clock_timestamp() WHERE business_id=$1 AND consumed_at IS NULL AND revoked_at IS NULL AND email=(SELECT lower(email) FROM "user" WHERE id=$2)',[business,target]);
     } else if(resource==='invitations' && !target && req.method==='GET') {

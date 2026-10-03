@@ -1,6 +1,6 @@
 # Custom Bot
 
-Slices 1–5 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, and Owner-only JSON configuration drafts with explicit immutable publication. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge, provider inference and workflow execution belong to later slices.
+Slices 1–6 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, and human takeover through a shared support inbox. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge, provider inference and workflow execution belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies; no cloud keys or model download is needed for this slice.
 
@@ -95,7 +95,31 @@ Unapproved/missing origins and unknown Businesses return the same `403` without 
 
 A Business website that signs in its own customers can verify them in chat. Its server signs a short-lived ES256 JWT with a key whose public half an Owner registered (`/api/businesses/:id/customer-keys`; API only). The widget tag carries it as `data-assertion`. `POST /api/chat/:businessId/identity` `{ "assertion": "…" }` links only the current anonymous conversation; `POST /api/chat/:businessId/logout` `{}` ends the session. Both rotate the session token. Logout, account switching and assertion expiry end access to earlier history at once, and replies that arrive afterwards are not delivered. Email and phone never identify or merge Customers. The full integration contract (claims, algorithm, keys, lifetimes) is in [docs/customer-identity.md](docs/customer-identity.md).
 
-Deferred to later slices: human takeover (#18), workflow execution and real providers (#19, #28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+Deferred to later slices: workflow execution and real providers (#19, #28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+
+## Human takeover and shared inbox
+
+Each Business has one shared support queue. Every active Owner and Support Member selects **Open inbox** beside the Business to see it. A conversation is `automated`, `waiting-for-support`, `human-controlled` or `resolved`.
+
+- A Customer selects **Talk to a person** (`POST /api/chat/:businessId/conversations/:id/handoff` `{}`), or an automated turn fails because connected generation is unavailable. Either puts the conversation in the queue.
+- An Operator can **Claim** a queued conversation. Claiming an automated conversation takes it over directly; an Operator must own a conversation before replying.
+- Every control change happens in one transaction, enforced by a database trigger whichever service makes it. It increments the conversation's execution generation, stops its queued and running automated turns (their late results are discarded), and posts the Customer notice: *Waiting for support*, *Support joined*, *Automated assistant resumed* or *Conversation resolved*. No notice promises a response time.
+- Customer messages sent while queued or under human control are stored with `turn_state: "human"` and never start an automated turn.
+- Only the current assignee can reply, **Resolve** or **Return to automated assistant**. Any Member can reassign a queued, human-controlled or resolved conversation to an active Member.
+- Resume replays nothing. The next Customer message starts the next automated turn.
+- A Customer message after resolution reopens the conversation under human control with the same assignee. If that Membership has been revoked, it returns to the queue instead.
+- Revoking a Membership returns that Member's human-controlled conversations to the queue.
+- Available/Away is manual and shown to the team only. It never assigns, releases or resumes a conversation. Away, sign-out and restarts keep assignments, messages and the pause.
+
+Operator inbox API (verified Operator session, same-origin):
+- `GET /api/businesses/:id/inbox`: your `operator_id`, active `members` (`email`, `role`, `available`) and up to 200 conversations with messages. The queue is listed first.
+- `GET /api/businesses/:id/inbox/conversations/:conversationId`: `control_state`, `assignee_id`/`assignee_email`, `handoff_reason` (`customer-request`, `operator-takeover`, `automation-failure`), `revision` and the full message history.
+- `POST /api/businesses/:id/inbox/availability` `{ "available": boolean }`.
+- `POST …/conversations/:conversationId/claim|resolve|resume` `{ "revision": "…" }`; `…/reassign` `{ "revision", "operator_id" }`; `…/messages` `{ "revision", "client_submission_id", "text" }`.
+
+`revision` changes whenever control or the assignee changes. Customer messages and replies do not change it. A stale revision, or an action by anyone but the assignee, returns `409` and changes nothing. All checks run under the conversation lock at commit. The Operator UI keeps a rejected reply in its box. A retried `client_submission_id` returns the original reply (`200`) and never sends twice. A non-Member gets `404`. Customers see Operator replies as `operator` messages without Operator identities.
+
+Lookup results and Customer memory are not shown yet; they arrive with actions (#20) and memory (#22).
 
 Public Operator APIs: Better Auth endpoints under `/api/auth` (sign-up/email, sign-in/email, sign-out, get-session, email-otp/send-verification-otp, email-otp/verify-email, email-otp/request-password-reset, email-otp/reset-password); `GET/POST /api/businesses`; `GET /api/businesses/:id`; `GET /health/ready`. Business creation accepts only `{ "name": "Example" }`; arbitrary ownership fields are rejected. Unauthorized Business selectors return 404.
 
@@ -111,6 +135,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.

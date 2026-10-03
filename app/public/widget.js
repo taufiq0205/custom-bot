@@ -20,7 +20,8 @@
   const input = el('textarea', {name: 'message', maxLength: 2000, rows: 3, required: true});
   input.style.cssText = 'display:block;width:100%;box-sizing:border-box';
   const send = el('button', {textContent: 'Send'});
-  const form = el('form', {}, el('label', {}, 'Message', input), send);
+  const human = el('button', {type: 'button', textContent: 'Talk to a person', hidden: true});
+  const form = el('form', {}, el('label', {}, 'Message', input), send, human);
   root.append(notice, log, form, status, history);
   script.after(root);
   const load = () => {try {return JSON.parse(localStorage.getItem(key)) ?? {};} catch {return {};}};
@@ -40,7 +41,7 @@
   }
   // An identity change replaces the whole state, including any unsent draft of the previous identity.
   const adopt = data => {state = {token: data.token ?? state.token, conversation: data.conversation.id, verified: data.verified ?? !!state.verified}; save(true);};
-  const label = m => m.author === 'customer' ? 'You' : m.author === 'system' ? 'Notice' : m.simulated ? 'Simulated assistant' : 'Assistant';
+  const label = m => m.author === 'customer' ? 'You' : m.author === 'operator' ? 'Support' : m.author === 'system' ? 'Notice' : m.simulated ? 'Simulated assistant' : 'Assistant';
   function render(conversation) {
     notice.textContent = (conversation.mode === 'simulation'
       ? 'Simulation mode: replies are simulated. No AI model is used, and replies contain no business facts. ' : '')
@@ -54,8 +55,12 @@
     earlier.replaceChildren(...others.map(c => el('li', {}, el('button', {type: 'button',
       textContent: `Open earlier conversation started ${new Date(c.created_at).toLocaleString()}`,
       onclick: () => {state.conversation = c.id; delete state.pending; save(); refresh();}}))));
+    human.hidden = conversation.control_state !== 'automated';
     clearTimeout(timer);
     if (conversation.messages.some(m => m.turn_state === 'queued' || m.turn_state === 'running')) timer = setTimeout(() => refresh(false), 1000);
+    // Support replies arrive while a person has (or is about to have) the conversation.
+    // ponytail: idle conversations poll every 10 s so an Operator takeover shows up; push updates if this load matters.
+    else timer = setTimeout(() => refresh(false), ['waiting-for-support', 'human-controlled'].includes(conversation.control_state) ? 3000 : 10000);
   }
   // Polling reloads only the open conversation; the list changes only with identity or new conversations.
   async function refresh(withList = true) {
@@ -112,6 +117,14 @@
     state = stored;
     if (state.conversation) return refresh();
     notice.textContent = ''; log.replaceChildren(); earlier.replaceChildren(); history.hidden = true;
+  });
+  human.addEventListener('click', async () => {
+    human.disabled = true;
+    try {render(await call(`/conversations/${state.conversation}/handoff`, {})); status.textContent = '';}
+    catch (error) {
+      if (error.status === 401 || error.status === 404) return restart();
+      status.textContent = 'Your request did not reach support. Select Talk to a person to try again.';
+    } finally {human.disabled = false;}
   });
   form.addEventListener('submit', async event => {
     event.preventDefault();

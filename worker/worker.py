@@ -102,6 +102,8 @@ def claim(connection):
             "lease_expires_at=least(clock_timestamp()+make_interval(secs => %s), deadline) "
             "WHERE id=%s AND status='queued' AND deadline>clock_timestamp() AND NOT EXISTS("
             "SELECT 1 FROM jobs r WHERE r.conversation_id=jobs.conversation_id AND r.status='running') "
+            "AND EXISTS(SELECT 1 FROM conversations c WHERE c.id=jobs.conversation_id AND c.control_state='automated' "
+            "AND c.execution_generation=jobs.execution_generation) "
             "RETURNING id,business_id,conversation_id,message_id,execution_generation",
             (WORKER, LEASE, candidate[0])).fetchone()
         if job and not identity:
@@ -130,6 +132,9 @@ def complete(connection, job, text):
             return
         if text is None:
             fail(connection, job, UNAVAILABLE, 'generation unavailable')
+            # An automation failure hands off: the control trigger pauses the conversation's remaining turns.
+            connection.execute("UPDATE conversations SET control_state='waiting-for-support', handoff_reason='automation-failure' "
+                               "WHERE id=%s", (job[2],))
             return
         connection.execute("UPDATE jobs SET status='completed', lease_owner=NULL WHERE id=%s", (job[0],))
         connection.execute("UPDATE messages SET turn_state='completed' WHERE id=%s", (job[3],))

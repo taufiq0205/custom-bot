@@ -3,8 +3,8 @@ import type { PoolClient } from 'pg';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { errors, importJWK, jwtVerify } from 'jose';
 import { origin as platform, pool } from './config.js';
-import { body, Failure, keys, uuid, verifier } from './memberships.js';
-const route=new RegExp(`^/api/chat/(${uuid})/(?:(identity|logout)|conversations(?:/(${uuid})(/messages)?)?)$`);
+import { body, Failure, keys, message as submitted, uuid, verifier } from './memberships.js';
+const route=new RegExp(`^/api/chat/(${uuid})/(?:(identity|logout)|conversations(?:/(${uuid})(/messages|/handoff)?)?)$`);
 const conversationColumns='c.id,c.control_state,c.configuration_version,p.document->\'generation\'->>\'mode\' AS mode';
 type Session={id:string,customer_id:string|null};
 const expired=()=>new Failure(401,'Chat session expired; start a new conversation');
@@ -21,7 +21,8 @@ async function conversation(client:PoolClient,business:string,session:Session,id
   const found=await client.query(`SELECT ${conversationColumns} FROM conversations c JOIN published_configurations p ON p.business_id=c.business_id AND p.version=c.configuration_version
     WHERE ${owned} AND c.id=$4`,[...scope(business,session),id]);
   if(!found.rowCount)throw new Failure(404,'Conversation not found');
-  const messages=await client.query(`SELECT id,author,text,simulated,client_submission_id,reply_to,turn_state,created_at FROM messages
+  // Operator identities and submission IDs stay internal.
+  const messages=await client.query(`SELECT id,author,text,simulated,CASE WHEN author='customer' THEN client_submission_id END AS client_submission_id,reply_to,turn_state,created_at FROM messages
     WHERE business_id=$1 AND conversation_id=$2 ORDER BY seq`,[business,id]);
   return {...found.rows[0],messages:messages.rows};
 }
@@ -37,6 +38,18 @@ async function start(client:PoolClient,business:string,session:Session) {
   await client.query(`INSERT INTO conversations(id,business_id,session_id,customer_id,configuration_version)
     SELECT $1,$2,$3,$4,max(version) FROM published_configurations WHERE business_id=$2`,[id,business,session.id,session.customer_id]);
   return id;
+}
+// Lock the conversation first: every turn and control transition takes this lock before its own checks.
+async function lock(client:PoolClient,business:string,session:Session,id:string) {
+  const locked=await client.query(`SELECT c.execution_generation,c.control_state,c.assignee_id FROM conversations c WHERE ${owned} AND c.id=$4 FOR UPDATE`,[...scope(business,session),id]);
+  if(!locked.rowCount)throw new Failure(404,'Conversation not found');
+  return locked.rows[0] as {execution_generation:string,control_state:string,assignee_id:string|null};
+}
+// A resolved conversation reopens under human control with its assignee, or returns to the queue if that Membership has ended.
+// The share lock makes a concurrent revocation wait, so it then releases this conversation too.
+async function reopen(client:PoolClient,business:string,id:string,assignee:string) {
+  const active=(await client.query('SELECT 1 FROM memberships WHERE business_id=$1 AND operator_id=$2 AND active FOR SHARE',[business,assignee])).rowCount;
+  await client.query(`UPDATE conversations SET control_state=$2,assignee_id=$3 WHERE id=$1`,[id,active?'human-controlled':'waiting-for-support',active?assignee:null]);
 }
 // The website's backend signs a JWT (ES256 only) with a key the Owner registered; see docs/customer-identity.md.
 async function verify(business:string,assertion:string) {
@@ -148,29 +161,38 @@ export async function chat(req:IncomingMessage,res:ServerResponse,path:string,js
     }
     if(id&&!messages&&req.method==='GET')return reply(200,await conversation(client,business,session,id));
     if(!(id&&messages&&req.method==='POST'))throw new Failure(404,'Not found');
-    keys(input,['client_submission_id','text']);
-    const submission=input.client_submission_id,text=typeof input.text==='string'?input.text.trim():null;
-    if(typeof submission!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(submission)||!text||text.length>2000)
-      throw new Failure(400,'Provide client_submission_id (8–100 letters, digits, - or _) and text (1–2000 characters)');
+    if(messages==='/handoff') {
+      keys(input,[]);
+      await client.query('BEGIN');
+      if(!await current(client,business,token!,'FOR SHARE'))throw expired();
+      const locked=await lock(client,business,session,id);
+      // Asking again while support already has the conversation changes nothing.
+      if(locked.control_state==='automated')await client.query(`UPDATE conversations SET control_state='waiting-for-support',handoff_reason='customer-request' WHERE id=$1`,[id]);
+      if(locked.control_state==='resolved')await reopen(client,business,id,locked.assignee_id!);
+      await client.query('COMMIT');
+      return reply(200,await conversation(client,business,session,id));
+    }
+    const {submission,text}=submitted(input);
     await client.query('BEGIN');
     // Recheck the session under a share lock so logout/switch and this submission serialize.
     if(!await current(client,business,token!,'FOR SHARE'))throw expired();
-    // Lock the conversation first: every turn transition takes this lock before its own checks.
-    const locked=await client.query(`SELECT c.execution_generation FROM conversations c WHERE ${owned} AND c.id=$4 FOR UPDATE`,[...scope(business,session),id]);
-    if(!locked.rowCount)throw new Failure(404,'Conversation not found');
+    const locked=await lock(client,business,session,id);
+    const automated=locked.control_state==='automated';
     const columns='id,client_submission_id,text,turn_state,created_at';
+    // Under human control the message waits for support and never starts an automated turn.
     const inserted=await client.query(`INSERT INTO messages(id,business_id,conversation_id,author,text,client_submission_id,turn_state,session_id)
-      VALUES($1,$2,$3,'customer',$4,$5,'queued',$6) ON CONFLICT(conversation_id,client_submission_id) DO NOTHING RETURNING ${columns}`,[randomUUID(),business,id,text,submission,session.id]);
+      VALUES($1,$2,$3,'customer',$4,$5,$7,$6) ON CONFLICT(conversation_id,client_submission_id) DO NOTHING RETURNING ${columns}`,[randomUUID(),business,id,text,submission,session.id,automated?'queued':'human']);
     if(!inserted.rowCount) {
       // A retried submission returns the original message whatever its turn state; it never enqueues new work.
-      const existing=(await client.query(`SELECT ${columns} FROM messages WHERE conversation_id=$1 AND client_submission_id=$2`,[id,submission])).rows[0];
-      if(existing.text!==text)throw new Failure(409,'Submission ID already used for a different message');
+      const existing=(await client.query(`SELECT ${columns} FROM messages WHERE conversation_id=$1 AND client_submission_id=$2 AND author='customer'`,[id,submission])).rows[0];
+      if(existing?.text!==text)throw new Failure(409,'Submission ID already used for a different message');
       await client.query('COMMIT');
       return reply(200,{message:existing});
     }
     const message=inserted.rows[0];
-    await client.query(`INSERT INTO jobs(id,business_id,kind,conversation_id,message_id,idempotency_key,execution_generation,deadline)
-      VALUES($1,$2,'turn',$3,$4,$5,$6,clock_timestamp()+interval '60 seconds')`,[randomUUID(),business,id,message.id,`turn:${message.id}`,locked.rows[0].execution_generation]);
+    if(locked.control_state==='resolved')await reopen(client,business,id,locked.assignee_id!);
+    if(automated)await client.query(`INSERT INTO jobs(id,business_id,kind,conversation_id,message_id,idempotency_key,execution_generation,deadline)
+      VALUES($1,$2,'turn',$3,$4,$5,$6,clock_timestamp()+interval '60 seconds')`,[randomUUID(),business,id,message.id,`turn:${message.id}`,locked.execution_generation]);
     await client.query('UPDATE conversations SET last_message_at=clock_timestamp() WHERE id=$1',[id]);
     await client.query('COMMIT');
     return reply(202,{message});

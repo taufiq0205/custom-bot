@@ -17,12 +17,15 @@ async function refresh() {
   try {
     const businesses=await request('/api/businesses');
     workspace.hidden=false;
-    list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.textContent=`${b.name} — ${b.role}`;
+    list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.append(Object.assign(document.createElement('span'),{textContent:`${b.name} — ${b.role}`}));
+      const inboxButton=document.createElement('button');inboxButton.textContent=`Open inbox ${b.name}`;
+      inboxButton.addEventListener('click',()=>run(async()=>{if(inboxBusiness?.id!==b.id){closeInbox();inboxBusiness=b;}await loadInbox();}));li.append(inboxButton);
       if(b.role==='Owner'){const button=document.createElement('button');button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{if(!discardEdits())return;clearConfiguration();selectedBusiness=b;await refreshMemberships();await loadConfiguration();}));li.append(button);}
       return li;}));
       if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) {selectedBusiness=null;clearConfiguration();}
+      if(inboxBusiness && !businesses.some(b=>b.id===inboxBusiness.id))closeInbox();
     await refreshMemberships();
-  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;clearConfiguration();document.querySelector('#membership-panel').hidden=true;}
+  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;clearConfiguration();closeInbox();document.querySelector('#membership-panel').hidden=true;}
 }
 async function run(action) {
   const buttons=[...document.querySelectorAll('button')];
@@ -138,4 +141,69 @@ document.querySelector('#config-publish').addEventListener('click',()=>run(async
   config={...config,revision:data.revision,published:data.version};
   showConfiguration({errors:[],blockers:[]});
   status_(`Published version ${data.version}. New conversations use it; existing conversations keep their version.`);
+}));
+
+// Shared inbox. Polling refreshes the list and open conversation but never touches reply drafts, and never adopts a newer revision:
+// actions carry the revision the Operator last opened or acted on, so the server rejects them after someone else changed control.
+let inboxBusiness=null,inbox=null,opened=null,drafts=new Map(),poll;
+const reply=document.querySelector('#inbox-reply');
+const inboxPath=()=>`/api/businesses/${inboxBusiness.id}/inbox`;
+const states={'automated':'Automated','waiting-for-support':'Waiting for support','human-controlled':'Human-controlled','resolved':'Resolved'};
+// Switching Business or account drops every draft, so none can be sent elsewhere.
+function closeInbox(){clearInterval(poll);inboxBusiness=inbox=opened=null;drafts=new Map();reply.value='';document.querySelector('#inbox-panel').hidden=true;document.querySelector('#inbox-conversation').hidden=true;}
+async function loadInbox() {
+  const business=inboxBusiness;
+  const data=await request(inboxPath());
+  if(business!==inboxBusiness)return;
+  inbox=data;
+  const me=data.members.find(m=>m.operator_id===data.operator_id);
+  document.querySelector('#inbox-panel').hidden=false;
+  document.querySelector('#inbox-title').textContent=`${business.name} inbox`;
+  document.querySelector('#inbox-availability').textContent=`You are ${me.available?'Available':'Away'}. Availability never assigns conversations.`;
+  document.querySelector('#inbox-toggle').textContent=me.available?'Set Away':'Set Available';
+  const available=data.members.filter(m=>m.available).map(m=>m.email);
+  document.querySelector('#inbox-team').textContent=available.length?`Available: ${available.join(', ')}`:'Nobody is available.';
+  document.querySelector('#inbox-list').replaceChildren(...data.conversations.map(c=>{
+    const li=document.createElement('li');
+    li.textContent=`${states[c.control_state]}${c.assignee_email?` — ${c.assignee_email}`:''}${c.handoff_reason?` (${c.handoff_reason})`:''} · ${new Date(c.last_message_at).toLocaleString()}`;
+    const button=document.createElement('button');button.textContent=`Open conversation ${c.id.slice(0,8)}`;
+    button.addEventListener('click',()=>run(async()=>{keepDraft();opened={id:c.id};reply.value=drafts.get(c.id)??'';await loadConversation();}));
+    li.append(button);return li;
+  }));
+  // Polling keeps the Operator's chosen assignee selected.
+  const assignee=document.querySelector('#inbox-assignee'),chosen=assignee.value;
+  assignee.replaceChildren(...data.members.map(m=>Object.assign(document.createElement('option'),{value:m.operator_id,textContent:`${m.email} (${m.role})`})));
+  if(data.members.some(m=>m.operator_id===chosen))assignee.value=chosen;
+  clearInterval(poll);
+  poll=setInterval(()=>{loadInbox().then(()=>opened&&loadConversation(true)).catch(()=>{});},3000);
+}
+const keepDraft=()=>{if(opened)drafts.set(opened.id,reply.value);};
+async function loadConversation(polled=false) {
+  const id=opened.id;
+  const c=await request(`${inboxPath()}/conversations/${id}`);
+  if(opened?.id!==id)return;
+  opened={...c,revision:polled?opened.revision:c.revision};
+  document.querySelector('#inbox-conversation').hidden=false;
+  const mine=c.assignee_id===inbox.operator_id;
+  document.querySelector('#inbox-meta').textContent=`${states[c.control_state]}${c.assignee_email?`, assigned to ${mine?'you':c.assignee_email}`:''}${c.handoff_reason?`. Reason: ${c.handoff_reason}`:''}. ${c.verified?'Verified Customer':'Anonymous Customer'}.`;
+  const who=m=>m.author==='customer'?'Customer':m.author==='operator'?`Support (${m.operator_email})`:m.author==='system'?'Notice':m.simulated?'Simulated assistant':'Assistant';
+  document.querySelector('#inbox-messages').replaceChildren(...c.messages.map(m=>Object.assign(document.createElement('li'),{textContent:`${who(m)}: ${m.text}`})));
+}
+const act=(action,body={})=>request(`${inboxPath()}/conversations/${opened.id}/${action}`,{revision:opened.revision,...body});
+const control=(action,message,input=()=>({}))=>()=>run(async()=>{if(!opened)return;await act(action,input());await loadConversation();await loadInbox();status_(message);});
+document.querySelector('#inbox-claim').addEventListener('click',control('claim','Conversation claimed. You are its assignee.'));
+document.querySelector('#inbox-resolve').addEventListener('click',control('resolve','Conversation resolved.'));
+document.querySelector('#inbox-resume').addEventListener('click',control('resume','Returned to the automated assistant. It replies to the next Customer message.'));
+document.querySelector('#inbox-reassign').addEventListener('click',control('reassign','Conversation reassigned.',()=>({operator_id:document.querySelector('#inbox-assignee').value})));
+document.querySelector('#inbox-toggle').addEventListener('click',()=>run(async()=>{const me=inbox.members.find(m=>m.operator_id===inbox.operator_id);await request(inboxPath()+'/availability',{available:!me.available});await loadInbox();status_(`You are now ${me.available?'Away':'Available'}.`);}));
+// A rejected reply stays in the box; retrying the same text reuses its submission ID, so it is never sent twice.
+let pendingReply=null;
+document.querySelector('#inbox-send').addEventListener('click',()=>run(async()=>{
+  const text=reply.value.trim();
+  if(!opened||!text)return;
+  if(pendingReply?.text!==text||pendingReply.conversation!==opened.id)pendingReply={id:crypto.getRandomValues(new Uint32Array(4)).join('-'),text,conversation:opened.id};
+  try {await act('messages',{client_submission_id:pendingReply.id,text});}
+  catch(error){throw new Error(`Not sent; your reply is kept. ${error.message}`);}
+  pendingReply=null;reply.value='';drafts.delete(opened.id);
+  await loadConversation();status_('Reply sent.');
 }));
