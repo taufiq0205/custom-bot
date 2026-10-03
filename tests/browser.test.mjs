@@ -236,7 +236,8 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
  const {operator,invitationToken}=await import('./helpers.mjs');
  const owner=await operator('browser-config-owner'),support=await operator('browser-config-support');
  const business=(await owner.request('/api/businesses',{name:'Browser Config'})).data;
- const path=`/api/businesses/${business.id}/configuration`;
+ const other=(await owner.request('/api/businesses',{name:'Browser Config Other'})).data;
+ const path=`/api/businesses/${business.id}/configuration`,otherPath=`/api/businesses/${other.id}/configuration`;
  assert.equal((await owner.request(`/api/businesses/${business.id}/invitations`,{email:support.email,role:'Support'})).status,201);
  assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
  const browser=await chromium.launch();
@@ -247,7 +248,7 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
  try {
   const page=await signIn(owner);
   const editor=page.getByLabel('Configuration JSON');
-  const open=async()=>{await page.getByRole('button',{name:'Manage Browser Config'}).click();await page.getByText(/Draft revision \d+ · published version \d+/).waitFor();};
+  const open=async()=>{await page.getByRole('button',{name:'Manage Browser Config',exact:true}).click();await page.getByText(/Draft revision \d+ · published version \d+/).waitFor();};
   await open();
   assert.equal(JSON.parse(await editor.inputValue()).generation.mode,'simulation');
   const invalid='{\n  "schema_version": 1,\n  "agents": [,]\n}';
@@ -294,9 +295,29 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   await page.getByText(/published version 2$/).waitFor();
   assert.equal((await owner.request(path+'/versions/2')).data.document.agents[0].name,'Renamed locally');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  // If the next Business's draft fails to load, the previous Business's text is gone and cannot be saved there.
+  const otherBefore=(await owner.request(otherPath)).data;
+  await editor.fill(local+' ');
+  const otherDraft=url=>url.pathname===otherPath;
+  await page.route(otherDraft,route=>route.abort());
+  page.once('dialog',d=>d.accept());
+  await page.getByRole('button',{name:'Manage Browser Config Other'}).click();
+  await page.waitForFunction(()=>document.querySelector('#membership-title').textContent.includes('Browser Config Other'));
+  assert.equal(await editor.inputValue(),'');
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.getByText('Select Manage again to load this Business configuration.',{exact:true}).waitFor();
+  const otherAfter=(await owner.request(otherPath)).data;
+  assert.equal(otherAfter.text,otherBefore.text);assert.equal(otherAfter.revision,otherBefore.revision);
+  await page.unroute(otherDraft);
+  // Signing out leaves no draft text in the page.
+  await page.getByRole('button',{name:'Manage Browser Config Other'}).click();
+  await page.getByText(/Draft revision \d+ · published version 1/).waitFor();
+  await page.getByRole('button',{name:'Sign out',exact:true}).click();
+  await page.getByText('Signed out.',{exact:true}).waitFor();
+  assert.equal(await page.locator('#config-text').inputValue(),'');
   const supportPage=await signIn(support);
   await supportPage.getByText('Browser Config — Support',{exact:true}).waitFor();
-  assert.equal(await supportPage.getByRole('button',{name:'Manage Browser Config'}).count(),0);
+  assert.equal(await supportPage.getByRole('button',{name:'Manage Browser Config',exact:true}).count(),0);
   assert.equal(await supportPage.getByLabel('Configuration JSON').isVisible(),false);
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
