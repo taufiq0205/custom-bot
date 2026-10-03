@@ -1,4 +1,3 @@
-import { request as httpRequest } from 'node:http';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -6,29 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
-import { account, client, otp, base } from './helpers.mjs';
+import { account, client, otp, base, compose, ready, limited, together } from './helpers.mjs';
 const asyncExec=promisify(execFile);
 const concurrentCompose=(...args)=>asyncExec('docker',['compose','-f','compose.yaml','-f','compose.test.yaml',...args]);
-const compose=(...args)=>execFileSync('docker',['compose','-f','compose.yaml','-f','compose.test.yaml',...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
-async function ready(){for(let i=0;i<60;i++){try{if((await fetch(base+'/health/ready')).ok)return;}catch{}await new Promise(r=>setTimeout(r,500));}throw new Error('Readiness timeout');}
-// Barrier holds two public HTTP bodies incomplete until both requests are in flight.
-async function consumeTogether(path, body) {
- const payload=JSON.stringify(body);
- let release, arrived=0;
- const barrier=new Promise(resolve=>{release=resolve;});
- return Promise.all([0,1].map(()=>new Promise((resolve,reject)=>{
-  const request=httpRequest(base+path,{method:'POST',agent:false,headers:{origin:base,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},response=>{
-   response.resume();response.on('end',()=>resolve(response.statusCode));
-  });
-  request.setTimeout(10000,()=>request.destroy(new Error('Race barrier timeout')));
-  request.on('error',reject);
-  request.write(payload.slice(0,-1));
-  request.once('socket',socket=>socket.once('connect',async()=>{
-   if(++arrived===2)release();
-   await barrier;request.end(payload.slice(-1));
-  }));
- })));
-}
+const consumeTogether=async(path,body)=>(await together([0,1].map(()=>({path,body})))).map(r=>r.status);
 test('tokens: independent concurrent consumers and expiry',async()=>{
  const {request,email,password}=await account('race');
  const token=await otp(email,'email-verification');
@@ -51,7 +31,7 @@ test('tokens: independent concurrent consumers and expiry',async()=>{
 test('Docker: restart persistence, private services, guarded migrations, seed idempotency and readiness failure',async()=>{
  const {request,email,password}=await account('durable');
  await request('/api/auth/email-otp/verify-email',{email,otp:await otp(email,'email-verification')});
- await request('/api/auth/sign-in/email',{email,password});
+ assert.equal((await limited(()=>request('/api/auth/sign-in/email',{email,password}))).status,200);
  const created=await request('/api/businesses',{name:'Preserved Business'});
  assert.equal(created.status,201);
  const membershipPath='/api/businesses/'+created.data.id;
@@ -63,7 +43,7 @@ test('Docker: restart persistence, private services, guarded migrations, seed id
  assert.deepEqual((await request(membershipPath+'/invitations')).data,invitationsBefore);
  assert.equal((await request('/api/businesses/'+created.data.id)).data.name,'Preserved Business');
  const login=await client();
- assert.equal((await login('/api/auth/sign-in/email',{email,password})).status,200);
+ assert.equal((await limited(()=>login('/api/auth/sign-in/email',{email,password}))).status,200);
  const before=(await login('/api/businesses')).data;
  const migrated=await Promise.all([concurrentCompose('run','--rm','migrate'),concurrentCompose('run','--rm','migrate')]);
  assert(migrated.every(x=>!x.stdout.includes('Applied')));

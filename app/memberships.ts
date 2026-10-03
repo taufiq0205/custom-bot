@@ -3,23 +3,23 @@ import type { PoolClient } from 'pg';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { pool, mode } from './config.js';
 import { mail } from './auth.js';
-const uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+export const uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const ttl=mode==='test' ? Number(process.env.TEST_INVITATION_TTL ?? 604800) : 604800;
 if (!Number.isInteger(ttl) || ttl<1 || ttl>604800) throw new Error('Invalid invitation TTL');
-const verifier=(token:string)=>createHash('sha256').update(token).digest('hex');
-class Failure extends Error {constructor(public status:number,message:string){super(message);}}
-async function body(req:IncomingMessage) {
+export const verifier=(token:string)=>createHash('sha256').update(token).digest('hex');
+export class Failure extends Error {constructor(public status:number,message:string){super(message);}}
+export async function body(req:IncomingMessage,limit=4096) {
   if(req.headers['content-type']?.split(';')[0].trim()!=='application/json') throw new Failure(415,'JSON required');
   req.setEncoding('utf8');let raw='';
-  for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4096)throw new Failure(413,'Request too large');}
+  for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>limit)throw new Failure(413,'Request too large');}
   try {const value=JSON.parse(raw);if(!value||Array.isArray(value)||typeof value!=='object')throw 0;return value;}
   catch {throw new Failure(400,'Invalid JSON object');}
 }
-function keys(value:Record<string,unknown>,expected:string[]) {
+export function keys(value:Record<string,unknown>,expected:string[]) {
   if(Object.keys(value).length!==expected.length || expected.some(k=>!(k in value))) throw new Failure(400,'Unexpected or missing fields');
 }
 export async function memberships(req:IncomingMessage,path:string,user:{id:string,email:string},json:(status:number,value:unknown)=>void) {
-  const match=path.match(new RegExp(`^/api/businesses/(${uuid})/(memberships|invitations)(?:/([^/]+))?$`));
+  const match=path.match(new RegExp(`^/api/businesses/(${uuid})/(memberships|invitations|website-origins)(?:/([^/]+))?$`));
   const accept=path==='/api/invitations/accept';
   if(!match&&!accept)return false;
   let client:PoolClient|undefined;
@@ -80,8 +80,19 @@ export async function memberships(req:IncomingMessage,path:string,user:{id:strin
       keys(input,[]);
       result=await client.query('UPDATE invitations SET revoked_at=clock_timestamp() WHERE business_id=$1 AND id=$2 AND consumed_at IS NULL AND revoked_at IS NULL RETURNING id',[business,target]);
       if(!result.rowCount)throw new Failure(404,'Invitation unavailable');
+    } else if(resource==='website-origins' && !target && req.method==='GET') {
+      const origins=await client.query('SELECT origin FROM website_origins WHERE business_id=$1 ORDER BY origin',[business]);
+      await client.query('COMMIT');json(200,origins.rows.map(r=>r.origin));return true;
+    } else if(resource==='website-origins' && !target && req.method==='POST') {
+      // Per-origin approve/withdraw cannot lose a concurrent Owner's change, so no revision is needed.
+      keys(input,['origin','approved']);
+      if(typeof input.origin!=='string'||input.origin.length>200||typeof input.approved!=='boolean')throw new Failure(400,'Provide origin and approved');
+      let parsed;try{parsed=new URL(input.origin);}catch{throw new Failure(400,'Website origin must look like https://shop.example.com');}
+      if(parsed.origin!==input.origin||!(mode==='hosted'?['https:']:['https:','http:']).includes(parsed.protocol))throw new Failure(400,'Website origin must look like https://shop.example.com');
+      await client.query(input.approved?'INSERT INTO website_origins(business_id,origin) VALUES($1,$2) ON CONFLICT DO NOTHING':'DELETE FROM website_origins WHERE business_id=$1 AND origin=$2',[business,input.origin]);
+      result={rows:[{origin:input.origin,approved:input.approved}]};
     } else throw new Failure(404,'Not found');
-    await client.query('COMMIT');json(200,target?result.rows[0]:result.rows);return true;
+    await client.query('COMMIT');json(200,target||resource==='website-origins'?result.rows[0]:result.rows);return true;
   } catch(error) {
     await client?.query('ROLLBACK');
     if(error instanceof Failure){json(error.status,{error:error.message});return true;}

@@ -72,7 +72,18 @@ async function refreshMemberships() {
       button.addEventListener('click',()=>run(async()=>{await request(path+'/invitations/'+i.id,{});status.textContent='Invitation cancelled.';}));li.append(button);}
     return li;
   }));
+  const origins=await request(path+'/website-origins');
+  document.querySelector('#origins').replaceChildren(...origins.map(origin=>{
+    const li=document.createElement('li');li.textContent=origin;
+    const button=document.createElement('button');button.textContent=`Remove origin: ${origin}`;
+    button.addEventListener('click',()=>run(async()=>{await request(path+'/website-origins',{origin,approved:false});status.textContent='Website origin removed.';}));
+    li.append(button);return li;
+  }));
 }
+document.querySelector('#origin').addEventListener('submit',event=>{
+  event.preventDefault();const origin=new FormData(event.currentTarget).get('origin');
+  run(async()=>{await request(`/api/businesses/${selectedBusiness.id}/website-origins`,{origin,approved:true});event.target.reset();status.textContent='Website origin approved.';});
+});
 document.querySelector('#invite').addEventListener('submit',event=>{
   event.preventDefault();const input=Object.fromEntries(new FormData(event.currentTarget));
   run(async()=>{await request(`/api/businesses/${selectedBusiness.id}/invitations`,input);status.textContent='Invitation sent to the intended email.';});

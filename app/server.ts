@@ -5,6 +5,7 @@ import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { auth, mail } from './auth.js';
 import { origin, pool } from './config.js';
 import { memberships } from './memberships.js';
+import { chat } from './chat.js';
 const authHandler = toNodeHandler(auth);
 const endpoints = new Set(['sign-up/email','sign-in/email','sign-out','get-session','email-otp/send-verification-otp','email-otp/verify-email','email-otp/request-password-reset','email-otp/reset-password']);
 createServer(async (req,res) => {
@@ -21,9 +22,11 @@ createServer(async (req,res) => {
         if (!worker.rowCount) return json(503,{error:'Worker unavailable; inspect worker service logs'});
         await pool.query('SELECT 1 FROM businesses LIMIT 1');
         await mail.verify();
-        return json(200,{status:'ready', app:'ok', database:'ok', worker:'ok', mail:'ok'});
+        return json(200,{status:'ready', app:'ok', database:'ok', worker:'ok', mail:'ok', generation:'simulation'});
       } catch {return json(503,{error:'Database/migrations or mail unavailable; inspect db, migrate and mail services'});}
     }
+    // Website chat enforces each Business's approved origins instead of the Operator app origin.
+    if (await chat(req,res,path,json)) return;
     if (!['GET','HEAD'].includes(req.method ?? '') && req.headers.origin !== origin) return json(403,{error:'Same-origin request required'});
     if (path.startsWith('/api/auth/')) {
       if (!endpoints.has(path.slice('/api/auth/'.length))) return json(404,{error:'Not found'});
@@ -62,7 +65,7 @@ createServer(async (req,res) => {
       }
       return json(404,{error:'Not found'});
     }
-    const files: Record<string,string> = {'/':'index.html','/ui.js':'ui.js','/style.css':'style.css'};
+    const files: Record<string,string> = {'/':'index.html','/ui.js':'ui.js','/style.css':'style.css','/widget.js':'widget.js'};
     if (req.method==='GET' && files[path]) {
       res.setHeader('Content-Type', path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');
       return res.end(await readFile(`app/public/${files[path]}`));

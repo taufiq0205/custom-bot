@@ -1,14 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { account, otp, invitationToken, client, base } from './helpers.mjs';
-async function operator(prefix) {
-  const a=await account(prefix);
-  assert.equal((await a.request('/api/auth/email-otp/verify-email',{email:a.email,otp:await otp(a.email,'email-verification')})).status,200);
-  const login=await a.request('/api/auth/sign-in/email',{email:a.email,password:a.password});
-  assert.equal(login.status,200);
-  return {...a,id:login.data.user.id,cookie:login.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')};
-}
+import { account, invitationToken, client, base, operator, together } from './helpers.mjs';
 test('Memberships: Owner invites intended verified Operator; Support in B cannot manage B',async()=>{
   const owner=await operator('members-owner'), support=await operator('members-support');
   const b=(await owner.request('/api/businesses',{name:'Membership B'})).data;
@@ -39,20 +32,6 @@ async function invite(owner,business,target,role='Owner') {
   assert.equal((await target.request('/api/invitations/accept',{token})).status,200);
   return token;
 }
-// Two independent sockets hold request bodies until both are connected.
-async function together(operations) {
-  let release,arrived=0;
-  const barrier=new Promise(resolve=>{release=resolve;});
-  return Promise.all(operations.map(({path,body,cookie})=>new Promise((resolve,reject)=>{
-    const payload=JSON.stringify(body);
-    const req=httpRequest(base+path,{method:'POST',agent:false,headers:{origin:base,cookie,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},res=>{
-      let raw='';res.setEncoding('utf8');res.on('data',s=>raw+=s);res.on('end',()=>resolve({status:res.statusCode,data:JSON.parse(raw)}));
-    });
-    req.setTimeout(10000,()=>req.destroy(new Error('Race timeout')));req.on('error',reject);
-    req.write(payload.slice(0,-1));
-    req.once('socket',socket=>socket.once('connect',async()=>{if(++arrived===operations.length)release();await barrier;req.end(payload.slice(-1));}));
-  })));
-}
 test('Invitations: invalid, unverified, expired, revoked, foreign IDs, stale revisions, and single-use race',async()=>{
   const owner=await operator('invite-owner'),target=await operator('invite-target');
   const b=(await owner.request('/api/businesses',{name:'Invitations B'})).data;
@@ -82,7 +61,7 @@ test('Invitations: invalid, unverified, expired, revoked, foreign IDs, stale rev
   assert.equal((await target.request('/api/invitations/accept',{token})).status,404);
   assert.equal((await target.request(path)).status,404);
   assert.equal((await create()).status,201);token=await invitationToken(target.email);
-  const race=await together([0,1].map(()=>({path:'/api/invitations/accept',body:{token},cookie:target.cookie})));
+  const race=await together([0,1].map(()=>({path:'/api/invitations/accept',body:{token},headers:{cookie:target.cookie}})));
   assert.deepEqual(race.map(r=>r.status).sort(),[200,404]);
   assert.equal((await owner.request(path+'/memberships/'+target.id,{role:'Owner',active:true,revision:'0'})).status,409);
   assert.equal((await owner.request(`/api/businesses/${foreign.id}/memberships/${target.id}`,{role:'Owner',active:false,revision:'1'})).status,404);
@@ -107,7 +86,7 @@ test('Memberships: independent concurrent removal/demotion preserve last Owner a
     await invite(first,b,second);
     const path=`/api/businesses/${b.id}`;
     const rows=(await first.request(path+'/memberships')).data;
-    const outcomes=await together([first,second].map((owner,i)=>({path:path+'/memberships/'+owner.id,cookie:owner.cookie,body:{role:actions[i]==='demote'?'Support':'Owner',active:actions[i]!=='revoke',revision:rows.find(m=>m.operator_id===owner.id).revision}})));
+    const outcomes=await together([first,second].map((owner,i)=>({path:path+'/memberships/'+owner.id,headers:{cookie:owner.cookie},body:{role:actions[i]==='demote'?'Support':'Owner',active:actions[i]!=='revoke',revision:rows.find(m=>m.operator_id===owner.id).revision}})));
     assert.deepEqual(outcomes.map(r=>r.status).sort(),[200,409]);
     const remaining=(await Promise.all([first,second].map(o=>o.request(path+'/memberships')))).find(r=>r.status===200);
     assert.equal(remaining.data.filter(m=>m.role==='Owner'&&m.active).length,1);

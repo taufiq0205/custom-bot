@@ -51,6 +51,7 @@ services:
   worker:
     build: worker
     environment:
+      APP_MODE: ${APP_MODE:-local}
       DATABASE_URL: postgres://custom_bot:${POSTGRES_PASSWORD}@db:5432/custom_bot
     depends_on:
       migrate: {condition: service_completed_successfully}

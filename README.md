@@ -1,6 +1,6 @@
 # Custom Bot
 
-Slices 1–2 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, and durable Business creation as Owner, plus Business Membership invitations, role changes and revocation. The archived configuration prototype remains an interaction reference. Chat, knowledge, provider inference and workflow execution belong to later slices.
+Slices 1–3 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, and durable anonymous website chat with labelled simulated replies. The archived configuration prototype remains an interaction reference. Verified Customers, configuration editing, knowledge, provider inference and workflow execution belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies; no cloud keys or model download is needed for this slice.
 
@@ -13,7 +13,7 @@ docker compose up --build -d --wait
 
 Open http://localhost:3100. Create an account, retrieve the verification code from http://localhost:8025, verify, sign in, and create a Business. The authenticated creator becomes Owner. Recovery sends a single-use code to the same mail transport; enter it and your new password, then sign in again. Reset revokes existing sessions. Repeating Create account for the same email does not replace its original password; use Recover access to change it. Codes expire in five minutes and allow five incorrect attempts. Authentication requests are rate limited in PostgreSQL (30/minute for sign-in and OTP endpoints; 60/minute otherwise). Local HTTP cookies are HttpOnly/SameSite; HTTPS enables Secure cookies. Mutations require the exact configured Origin, including API clients.
 
-The `local` Compose profile enables mail capture (set in `.env.example`). Only the app and mail UI bind to loopback; PostgreSQL, SMTP and the Python worker have no published ports. Database and worker use an internal Docker network. The worker only records readiness in slice 1; no fictitious job processing or simulation is claimed. Database state persists in the `database` volume across `docker compose down`/restart. **Do not use `down -v` to preserve data.**
+The `local` Compose profile enables mail capture (set in `.env.example`). Only the app and mail UI bind to loopback; PostgreSQL, SMTP and the Python worker have no published ports. Database and worker use an internal Docker network. The Python worker processes durable chat turn jobs (see Website chat) and records its heartbeat for readiness. Database state persists in the `database` volume across `docker compose down`/restart. **Do not use `down -v` to preserve data.**
 
 Readiness checks migrations/database, worker heartbeat and SMTP. Inspect `docker compose ps` and `docker compose logs migrate app worker` when startup fails. An unapplied/failed migration prevents traffic. Migrations execute in order under a database advisory lock and record checksums; changed applied files fail rather than being silently rerun. Authentication SQL was generated from Better Auth 1.7.7. New migrations must use new numbered files.
 
@@ -31,7 +31,28 @@ Owners select **Manage** beside their Business to invite a verified Operator as 
 
 Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration, credentials and trace APIs remain later slices and return 404 for all roles.
 
-Public Operator APIs: Better Auth endpoints under `/api/auth` (sign-up/email, sign-in/email, sign-out, get-session, email-otp/send-verification-otp, email-otp/verify-email, email-otp/request-password-reset, email-otp/reset-password); `GET/POST /api/businesses`; `GET /api/businesses/:id`; `GET /health/ready`. Business creation accepts only `{ "name": "Example" }`; arbitrary ownership fields are rejected. No Customer APIs are needed in this slice. Unauthorized Business selectors return 404.
+## Website chat (anonymous, simulated)
+
+Every Business starts with an immutable, system-published configuration version 1 whose generation mode is `simulation`; it is created with the Business (and backfilled for existing ones) and cannot be updated or deleted. No provider keys are read in this slice. Every automated reply is labelled `simulated: true` and says that no AI model generated it, and readiness reports `"generation": "simulation"`. A pinned configuration in any other mode fails the turn visibly instead of pretending to generate.
+
+An Owner approves each website that may embed chat (**Manage → Website chat origins**, or `GET/POST /api/businesses/:id/website-origins` with exactly `{ "origin": "https://shop.example.com", "approved": true | false }`). Origins must be exact `scheme://host[:port]` values; hosted mode accepts HTTPS only. Withdrawing an origin cuts off existing sessions on their next request. Embed the widget on an approved page:
+
+```html
+<script src="http://localhost:3100/widget.js" data-business="BUSINESS_ID" defer></script>
+```
+
+Customer API (every request needs an approved `Origin`; no cookies; `Authorization: Bearer <token>` identifies the browser's anonymous session):
+
+- `POST /api/chat/:businessId/conversations` `{}` — without a token, creates an anonymous session and returns its `token` once (only a SHA-256 verifier is stored); with a token, starts another conversation in that session. New conversations pin the current published configuration version.
+- `GET /api/chat/:businessId/conversations` — this session's conversations only.
+- `GET /api/chat/:businessId/conversations/:id` — `control_state`, `configuration_version`, `mode` and ordered messages (`author`, `text`, `simulated`, `reply_to`, `turn_state`).
+- `POST /api/chat/:businessId/conversations/:id/messages` `{ "client_submission_id": "8–100 of A-Z a-z 0-9 _ -", "text": "1–2000 characters" }` — `202` when accepted (a reply is not yet delivered), `200` with the original message for a retried ID, `409` if the ID was used for different text.
+
+Unapproved/missing origins and unknown Businesses return the same `403` without CORS access; invalid or foreign-Business tokens return `401`; another session's conversation returns `404`. Each message creates one durable turn job. The worker claims the oldest turn per conversation in a short transaction with a lease bounded by the 60-second execution deadline, holds no transaction during the external step, and accepts its result only while its lease and the conversation's execution generation are current. Expired leases (for example a worker crash) and missed deadlines mark the turn `failed` with a visible notice; nothing is replayed, and retrying the same submission ID returns the failed original. Restart preserves sessions, conversations and messages. The widget stores its token in the website's `localStorage`, renders text only, and reuses a submission ID only to retry the same unsent text.
+
+Deferred to later slices: verified Customers and session expiry (#16), human takeover (#18), workflow execution and real providers (#19, #28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+
+Public Operator APIs: Better Auth endpoints under `/api/auth` (sign-up/email, sign-in/email, sign-out, get-session, email-otp/send-verification-otp, email-otp/verify-email, email-otp/request-password-reset, email-otp/reset-password); `GET/POST /api/businesses`; `GET /api/businesses/:id`; `GET /health/ready`. Business creation accepts only `{ "name": "Example" }`; arbitrary ownership fields are rejected. Unauthorized Business selectors return 404.
 
 Reproducible checks (Node 22.22.3 on the host):
 
@@ -45,6 +66,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, local SMTP capture, independent clients for token-consumption races, and Chromium for onboarding/recovery at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds and invitation expiry to twenty seconds only in test mode; no test control route is exposed. The runtime test restarts this Compose project's database/app/worker and temporarily stops the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) and [Membership validation](docs/validation-14.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) and [website chat validation](docs/validation-15.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.

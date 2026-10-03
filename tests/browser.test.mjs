@@ -78,3 +78,52 @@ test('browser: invite, accept, promote/demote, cancel, revoke; Support UI hides 
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
 });
+test('browser: Owner approves a website; anonymous Customers chat with labelled simulation and browser-scoped history',async()=>{
+ const {operator}=await import('./helpers.mjs');
+ const {createServer}=await import('node:http');
+ const owner=await operator('browser-chat-owner');
+ const business=(await owner.request('/api/businesses',{name:'Browser Chat'})).data;
+ // A controlled Business website on its own origin embeds the widget from the app.
+ const site=createServer((req,res)=>{res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop</title><h1>Shop</h1><script src="${base}/widget.js" data-business="${business.id}" defer></script>`);});
+ await new Promise(r=>site.listen(0,'127.0.0.1',r));
+ const approved=`http://127.0.0.1:${site.address().port}`,unapproved=`http://localhost:${site.address().port}`;
+ const browser=await chromium.launch();
+ const errors=[];
+ const page=async()=>{const p=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();p.on('pageerror',e=>errors.push(e.message));return p;};
+ try {
+  const ownerPage=await page();
+  await ownerPage.goto(base);
+  await ownerPage.getByLabel('Email',{exact:true}).fill(owner.email);
+  await ownerPage.getByLabel('Password',{exact:true}).fill(owner.password);
+  await ownerPage.getByRole('button',{name:'Sign in',exact:true}).click();
+  await ownerPage.getByRole('button',{name:'Manage Browser Chat'}).click();
+  await ownerPage.getByLabel('Website origin').fill(approved);
+  await ownerPage.getByRole('button',{name:'Approve origin',exact:true}).click();
+  await ownerPage.getByText('Website origin approved.',{exact:true}).waitFor();
+  await ownerPage.getByRole('button',{name:`Remove origin: ${approved}`,exact:true}).waitFor();
+
+  const first=await page();
+  await first.goto(approved);
+  await first.getByText(/Simulation mode: replies are simulated\. No AI model is used.*Configuration version 1\./).waitFor();
+  await first.getByLabel('Message').fill('Where is my order?');
+  await first.getByRole('button',{name:'Send',exact:true}).click();
+  const log=first.getByRole('log');
+  await log.getByText('You: Where is my order?',{exact:true}).waitFor();
+  await log.getByText(/^Simulated assistant: Simulated reply: no AI model generated this text/).waitFor();
+  await first.reload();
+  await first.getByRole('log').getByText('You: Where is my order?',{exact:true}).waitFor();
+  assert.equal(await first.getByRole('log').getByRole('listitem').count(),2);
+
+  // Another browser has its own anonymous session and sees none of the first Customer's history.
+  const second=await page();
+  await second.goto(approved);
+  await second.getByText(/Configuration version 1\./).waitFor();
+  assert.equal(await second.getByRole('log').getByRole('listitem').count(),0);
+  const other=await page();
+  await other.goto(unapproved);
+  await other.getByText('Chat is unavailable on this website right now.',{exact:true}).waitFor();
+  assert.equal(await other.getByRole('button',{name:'Send',exact:true}).isDisabled(),true);
+  for(const p of [ownerPage,first,second,other])assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.deepEqual(errors,[]);
+ } finally {await browser.close();site.close();}
+});
