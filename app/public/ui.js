@@ -5,9 +5,9 @@ async function request(path, body) {
   const data = await response.json();
   if (!response.ok) {
     const message = data.message || data.error || 'Request failed';
-    throw new Error(data.code === 'INVALID_EMAIL_OR_PASSWORD'
+    throw Object.assign(new Error(data.code === 'INVALID_EMAIL_OR_PASSWORD'
       ? `${message}. Use your original password, or select Recover access to set a new one.`
-      : message);
+      : message), {status:response.status,data});
   }
   return data;
 }
@@ -18,11 +18,11 @@ async function refresh() {
     const businesses=await request('/api/businesses');
     workspace.hidden=false;
     list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.textContent=`${b.name} — ${b.role}`;
-      if(b.role==='Owner'){const button=document.createElement('button');button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{selectedBusiness=b;await refreshMemberships();}));li.append(button);}
+      if(b.role==='Owner'){const button=document.createElement('button');button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{if(!discardEdits())return;clearConfiguration();selectedBusiness=b;await refreshMemberships();await loadConfiguration();}));li.append(button);}
       return li;}));
-      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) selectedBusiness=null;
+      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) {selectedBusiness=null;clearConfiguration();}
     await refreshMemberships();
-  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;document.querySelector('#membership-panel').hidden=true;}
+  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;clearConfiguration();document.querySelector('#membership-panel').hidden=true;}
 }
 async function run(action) {
   const buttons=[...document.querySelectorAll('button')];
@@ -92,3 +92,50 @@ document.querySelector('#accept-invitation').addEventListener('submit',event=>{
   event.preventDefault();const token=new FormData(event.currentTarget).get('token');
   run(async()=>{await request('/api/invitations/accept',{token});event.target.reset();status.textContent='Invitation accepted.';});
 });
+
+// The configuration editor loads only on Manage or Reload, so other actions never replace unsaved text.
+let config=null;
+const editor=document.querySelector('#config-text');
+const configPath=()=>`/api/businesses/${selectedBusiness.id}/configuration`;
+// Switching Business or account drops the previous draft, so its text can never be saved elsewhere.
+function clearConfiguration(){config=null;editor.value='';document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
+const discardEdits=()=>!config||editor.value===config.text||confirm('Discard your unsaved configuration edits?');
+function showConfiguration(validation) {
+  document.querySelector('#config-state').textContent=`Draft revision ${config.revision} · published version ${config.published}`;
+  const where=i=>i.line?`Line ${i.line}, column ${i.column}`:i.path||'Document';
+  document.querySelector('#config-issues').replaceChildren(
+    ...validation.errors.map(i=>Object.assign(document.createElement('li'),{textContent:`Error — ${where(i)}: ${i.message}`})),
+    ...validation.blockers.map(i=>Object.assign(document.createElement('li'),{textContent:`Before publishing — ${where(i)}: ${i.message}`})));
+}
+const conflict=latest=>new Error(`Another Owner changed the draft (now revision ${latest.revision}). Your text is kept here and was not saved. Copy it if needed, then select Reload draft to load the latest.`);
+async function loadConfiguration() {
+  const data=await request(configPath());
+  config={revision:data.revision,text:data.text,published:data.published_version};
+  editor.value=data.text;
+  showConfiguration(data.validation);
+}
+const loaded=()=>{if(!config)throw new Error('Select Manage again to load this Business configuration.');};
+async function saveConfiguration() {
+  loaded();
+  const text=editor.value;
+  const data=await request(configPath(),{text,revision:config.revision}).catch(error=>{throw error.status===409?conflict(error.data.latest):error;});
+  config={...config,revision:data.revision,text};
+  showConfiguration(data.validation);
+  const {json_valid,errors,blockers}=data.validation;
+  status_(!json_valid||errors.length?'Draft saved with errors; it cannot be published until they are fixed.':blockers.length?'Draft saved; it is incomplete and cannot be published yet.':'Draft saved.');
+}
+const status_=message=>{status.textContent=message;};
+document.querySelector('#config-save').addEventListener('click',()=>run(saveConfiguration));
+document.querySelector('#config-reload').addEventListener('click',()=>run(async()=>{if(!discardEdits())return;config=null;await loadConfiguration();status_('Latest draft loaded.');}));
+document.querySelector('#config-publish').addEventListener('click',()=>run(async()=>{
+  loaded();
+  if(editor.value!==config.text)await saveConfiguration();
+  const data=await request(configPath()+'/publish',{revision:config.revision}).catch(error=>{
+    if(error.status===409)throw conflict(error.data.latest);
+    if(error.status===422){showConfiguration(error.data.validation);throw new Error('Not published: fix the listed problems first.');}
+    throw error;
+  });
+  config={...config,revision:data.revision,published:data.version};
+  showConfiguration({errors:[],blockers:[]});
+  status_(`Published version ${data.version}. New conversations use it; existing conversations keep their version.`);
+}));

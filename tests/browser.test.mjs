@@ -232,3 +232,72 @@ test('browser: a shared browser links only the current anonymous chat; sign-out 
   assert.deepEqual(errors,[]);
  } finally {await browser.close();site.close();}
 });
+test('browser: Owner keeps invalid JSON across reload, sees located errors, keeps local text on conflict, publishes; Support has no editor',async()=>{
+ const {operator,invitationToken}=await import('./helpers.mjs');
+ const owner=await operator('browser-config-owner'),support=await operator('browser-config-support');
+ const business=(await owner.request('/api/businesses',{name:'Browser Config'})).data;
+ const path=`/api/businesses/${business.id}/configuration`;
+ assert.equal((await owner.request(`/api/businesses/${business.id}/invitations`,{email:support.email,role:'Support'})).status,201);
+ assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
+ const browser=await chromium.launch();
+ const errors=[];
+ const signIn=async a=>{const p=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();p.on('pageerror',e=>errors.push(e.message));
+  await p.goto(base);await p.getByLabel('Email',{exact:true}).fill(a.email);await p.getByLabel('Password',{exact:true}).fill(a.password);
+  await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.getByText('Signed in.',{exact:true}).waitFor();return p;};
+ try {
+  const page=await signIn(owner);
+  const editor=page.getByLabel('Configuration JSON');
+  const open=async()=>{await page.getByRole('button',{name:'Manage Browser Config'}).click();await page.getByText(/Draft revision \d+ · published version \d+/).waitFor();};
+  await open();
+  assert.equal(JSON.parse(await editor.inputValue()).generation.mode,'simulation');
+  const invalid='{\n  "schema_version": 1,\n  "agents": [,]\n}';
+  await editor.fill(invalid);
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.getByText('Draft saved with errors; it cannot be published until they are fixed.',{exact:true}).waitFor();
+  await page.getByText(/^Error — Line 3, column 14:/).waitFor();
+  // Another Owner action refreshes the page data but never replaces the editor text.
+  await editor.fill(invalid+' ');
+  await page.getByLabel('Invite email').fill(`browser-config-${crypto.randomUUID()}@example.test`);
+  await page.getByRole('button',{name:'Send invitation',exact:true}).click();
+  await page.getByText('Invitation sent to the intended email.',{exact:true}).waitFor();
+  assert.equal(await editor.inputValue(),invalid+' ');
+  await page.reload();await open();
+  assert.equal(await editor.inputValue(),invalid);
+  await page.getByRole('button',{name:'Publish',exact:true}).click();
+  await page.getByText('Not published: fix the listed problems first.',{exact:true}).waitFor();
+  // A structurally valid, incomplete draft lists located publication blockers.
+  const doc=(await owner.request(path+'/versions/1')).data.document;
+  await editor.fill(JSON.stringify({...doc,workflow:{...doc.workflow,entry:null}},null,2));
+  await page.getByRole('button',{name:'Publish',exact:true}).click();
+  await page.getByText('Not published: fix the listed problems first.',{exact:true}).waitFor();
+  await page.getByText('Before publishing — /workflow/entry: Choose a start step',{exact:true}).waitFor();
+  // Another Owner's save makes this page's revision stale: the save is rejected and the local text stays.
+  const latest=(await owner.request(path)).data;
+  assert.equal((await owner.request(path,{text:JSON.stringify(doc),revision:latest.revision})).status,200);
+  const local=JSON.stringify({...doc,agents:[{...doc.agents[0],name:'Renamed locally'}]},null,2);
+  await editor.fill(local);
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.getByText(/^Another Owner changed the draft .*Your text is kept here and was not saved/).waitFor();
+  assert.equal(await editor.inputValue(),local);
+  assert.equal((await owner.request(path)).data.text,JSON.stringify(doc));
+  // Reloading asks before discarding; declining keeps the text.
+  page.once('dialog',d=>d.dismiss());
+  await page.getByRole('button',{name:'Reload draft',exact:true}).click();
+  assert.equal(await editor.inputValue(),local);
+  page.once('dialog',d=>d.accept());
+  await page.getByRole('button',{name:'Reload draft',exact:true}).click();
+  await page.getByText('Latest draft loaded.',{exact:true}).waitFor();
+  assert.equal(await editor.inputValue(),JSON.stringify(doc));
+  await editor.fill(local);
+  await page.getByRole('button',{name:'Publish',exact:true}).click();
+  await page.getByText(/^Published version 2\./).waitFor();
+  await page.getByText(/published version 2$/).waitFor();
+  assert.equal((await owner.request(path+'/versions/2')).data.document.agents[0].name,'Renamed locally');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  const supportPage=await signIn(support);
+  await supportPage.getByText('Browser Config — Support',{exact:true}).waitFor();
+  assert.equal(await supportPage.getByRole('button',{name:'Manage Browser Config'}).count(),0);
+  assert.equal(await supportPage.getByLabel('Configuration JSON').isVisible(),false);
+  assert.deepEqual(errors,[]);
+ } finally {await browser.close();}
+});

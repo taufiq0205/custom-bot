@@ -61,6 +61,16 @@
 <label>Website origin <input name="origin" type="url" required maxlength="200" placeholder="https://shop.example.com"></label>
 <button>Approve origin</button>
 </form>
+<section id="configuration-panel">
+<h3>Configuration</h3>
+<p>Edit the JSON draft. Saving keeps invalid text; only a complete, valid draft can be published. New conversations use the latest published version.</p>
+<p id="config-state"></p>
+<label>Configuration JSON <textarea id="config-text" rows="18" spellcheck="false" autocomplete="off"></textarea></label>
+<button id="config-save">Save draft</button>
+<button id="config-publish">Publish</button>
+<button id="config-reload">Reload draft</button>
+<ul id="config-issues"></ul>
+</section>
 </section>
 <button id="signout">Sign out</button>
 </section>

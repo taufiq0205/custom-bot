@@ -1,6 +1,6 @@
 # Custom Bot
 
-Slices 1–4 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, and verified Customer identity from Business websites. The archived configuration prototype remains an interaction reference. Configuration editing, knowledge, provider inference and workflow execution belong to later slices.
+Slices 1–5 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, and Owner-only JSON configuration drafts with explicit immutable publication. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge, provider inference and workflow execution belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies; no cloud keys or model download is needed for this slice.
 
@@ -29,7 +29,48 @@ Repeat seed commands leave existing Businesses/Memberships unchanged. Seeds neve
 
 Owners select **Manage** beside their Business to invite a verified Operator as Owner or Support, change a current Member's role, revoke access, or cancel a pending invitation. Invitation tokens arrive only at the intended email; the recipient signs in with that verified account and pastes the token into **Accept invitation**. Invitations expire after seven days, are single-use, and are superseded by a new invitation to the same email. Existing active Memberships cannot be overwritten through invitation acceptance. Revocation cancels pending invitations to that Member; demotion/revocation also cancels grants issued by that Owner. A fresh authorized invitation can restore revoked access. Every privileged request rechecks the current Business Membership; authority in another Business cannot grant access. Revocation does not require account sign-out. Concurrent changes preserve at least one active Owner.
 
-Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration, credentials and trace APIs remain later slices and return 404 for all roles.
+Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration APIs are Owner-only (below); credentials and trace APIs remain later slices and return 404 for all roles.
+
+## Configuration (JSON)
+
+Each Business has one shared configuration draft and a series of immutable published versions. Owners select **Manage**, edit **Configuration JSON**, then **Save draft** or **Publish**. Support Operators and other Businesses get no editor and `404` from the API.
+
+- `GET /api/businesses/:id/configuration`: `{text, revision, base_version, published_version, updated_at, validation}`.
+- `POST /api/businesses/:id/configuration` `{ "text": "raw JSON text", "revision": "expected revision" }` saves the text verbatim, even when it is invalid, and returns the new `revision` and `validation`. Text may be at most 262,144 characters, without NUL or unpaired surrogates.
+- `POST /api/businesses/:id/configuration/publish` `{ "revision": "expected revision" }` publishes the *saved* draft at that revision. It returns `201 {version, revision}`, or `422 {validation}` when the draft has problems.
+- `GET /api/businesses/:id/configuration/versions/:version` returns that immutable published `document`.
+
+`validation` is `{json_valid, errors, blockers}`. Every entry is located: a parse error gives `line`/`column`, and other entries give a JSON Pointer `path` such as `/workflow/steps/2/position/x`.
+
+- **Errors** cover unparseable JSON, duplicate object keys, out-of-range numbers, unknown fields, wrong types, duplicate IDs or connections, dangling references, non-finite positions (for example `1e999`) and malformed action schemas. They also cover write methods, non-HTTPS or IP/localhost destinations, URLs with credentials, and missing credential or authorization-policy references.
+- **Blockers** cover a `null` entry and unconnected required outputs. The draft stays saved and editable, but it cannot be published.
+
+Both kinds block publication. Only published versions ever execute.
+
+A stale `revision` returns `409` with the `latest` draft and saves nothing. The editor keeps your local text, and reloading asks before discarding it. Publication also advances the draft revision, so two Owners publishing the same revision create exactly one version. A version is `max(version)+1`, created in the same transaction under the Business lock. The highest version is the current entry workflow for new conversations. Existing conversations keep the version they started with.
+
+Schema version 1. Top-level fields:
+- `schema_version`: `1`.
+- `generation`: `{mode: "simulation" | "connected"}`.
+- optional `decision`: `{engine: "jev" | "laya" | "von", model?}`.
+- optional `sources`: `[{id, priority: 1–1000}]`.
+- `agents`: `[{id, name, instructions, sources?, actions?, model?: {provider: "deepseek" | "qwen", name, temperature?: 0–2, max_tokens?: 1–8192}}]`.
+- `actions`: `[{id, method: "GET", url, input_schema, result_schema, credential, authorization, timeout_ms: 1–15000}]`. `credential` and `authorization` are references, never secret values. Schemas use a JSON Schema subset: `type`, `properties`, `required`, `items` and `description`.
+- `workflow`: `{entry, steps, connections}`.
+
+Every step has `id`, `type` and a finite `position {x, y}`. The step types and the outputs each must connect:
+
+| Type | Fields | Outputs |
+| --- | --- | --- |
+| `retrieval` | `sources` | `next` |
+| `condition` | `field`, `equals` | `yes`, `fallback` |
+| `http` | `action` | `success`, `failure` |
+| `agent` | `agent`, `final` | final agents: `unsupported`; others: `next`, `unsupported` |
+| `handoff` | none | none |
+
+Connections are `{from, output, to}`, and `to` may be `null` in a draft.
+
+New Businesses start with a publishable simulation draft: one agent with its `unsupported` output connected to a handoff. Businesses created before this slice keep their original version 1, whose single agent lacks that connection. Their draft therefore shows one blocker until a handoff is connected.
 
 ## Website chat (simulated)
 
@@ -70,6 +111,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.
