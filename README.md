@@ -1,6 +1,6 @@
 # Custom Bot
 
-Slices 1–6 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, and human takeover through a shared support inbox. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge, provider inference and workflow execution belong to later slices.
+Slices 1–7 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, human takeover through a shared support inbox, and bounded execution of the published workflow. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge, provider inference, action credentials and Customer authorization belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies; no cloud keys or model download is needed for this slice.
 
@@ -95,13 +95,46 @@ Unapproved/missing origins and unknown Businesses return the same `403` without 
 
 A Business website that signs in its own customers can verify them in chat. Its server signs a short-lived ES256 JWT with a key whose public half an Owner registered (`/api/businesses/:id/customer-keys`; API only). The widget tag carries it as `data-assertion`. `POST /api/chat/:businessId/identity` `{ "assertion": "…" }` links only the current anonymous conversation; `POST /api/chat/:businessId/logout` `{}` ends the session. Both rotate the session token. Logout, account switching and assertion expiry end access to earlier history at once, and replies that arrive afterwards are not delivered. Email and phone never identify or merge Customers. The full integration contract (claims, algorithm, keys, lifetimes) is in [docs/customer-identity.md](docs/customer-identity.md).
 
-Deferred to later slices: workflow execution and real providers (#19, #28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+Deferred to later slices: real providers (#28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+
+## Workflow execution
+
+Each Customer message in an `automated` conversation is one turn. The worker runs the conversation's pinned published workflow from its `entry`:
+
+| Step | Behaviour |
+| --- | --- |
+| `retrieval` | Continues to `next`. Knowledge ingestion arrives with #21, so it finds no evidence yet. |
+| `condition` | `yes` when the structured context field strictly equals `equals` (`true` is not `1`, and `1` equals `1.0`), otherwise `fallback`. |
+| `http` | Takes the action's input properties from the context. If a required one is missing, the turn sends one clarification built from the property `description` ("To continue, please tell me your order number.") and ends. The next message starts a new turn. A result matching `result_schema` merges its declared top-level properties into the context and goes to `success`. Undeclared properties are dropped. Anything else goes to `failure`. |
+| `agent` | In `simulation` mode a final agent gives the labelled simulated reply, and other agents continue with no context. In `connected` mode the agent's model must reply with one JSON object. Intermediate agents return `{"outcome":"next","context":{…}}` (at most 20 flat text/number/boolean fields), which is never shown to the Customer. Final agents return `{"outcome":"reply","reply":"…"}`. Any agent can return `{"outcome":"unsupported"}`, which follows its `unsupported` output. Only the final agent's reply is delivered. Context reaches the model as data in a user message, never as instructions, and an agent cannot overwrite a field set by a verified HTTP result. If it tries, the turn fails. |
+| `handoff` | Completes the turn and queues the conversation for support (`workflow-handoff`). |
+
+Limits per Customer message:
+- 20 steps.
+- 3 agent calls and 5 business HTTP calls. Retries count.
+- A 15-second timeout per HTTP attempt, or the action's shorter `timeout_ms`. This is wall-clock time covering connection, headers and a trickled body.
+- A 60-second deadline from acceptance.
+
+A transient failure (timeout, connection error, 429 or 5xx) is retried once if budget and time remain. Other failures are not retried: 3xx (redirects are never followed), other 4xx, certificate rejection, and malformed, oversized or non-JSON results. A failed HTTP attempt follows the step's `failure` output.
+
+Exhausting a limit, invalid agent output, a failed provider call or unavailable generation fails the turn visibly with a notice. The conversation goes to support as `automation-failure`, and no assistant text is delivered.
+
+Before every external attempt, and again before accepting the result, the worker briefly locks the conversation. In that check it:
+- requires its lease, the turn's execution generation, `automated` control and the submitting chat session to still be current;
+- extends the lease to cover only that attempt.
+
+No transaction stays open during a call. A takeover, handoff or sign-out therefore stops all later steps and discards late results. A worker crash fails the turn visibly once the lease lapses, and nothing is replayed. Each attempt is recorded value-free (step, kind, target, status, error, timing) for the Owner traces in #27.
+
+Current limits of this slice:
+- **No business HTTP request leaves the platform.** Action credentials, Customer authorization and DNS/redirect destination checks arrive with #20. Until then an `http` step records a refused attempt and follows `failure`. The only exception is the test overlay's `*.fixture.test` hosts.
+- **Connected agents have no real provider before #28.** A connected agent is unavailable unless the test overlay's fixture provider is selected with model name `fixture`.
+- Consent, source and deletion revalidation join the same check with #21–#24.
 
 ## Human takeover and shared inbox
 
 Each Business has one shared support queue. Every active Owner and Support Member selects **Open inbox** beside the Business to see it. A conversation is `automated`, `waiting-for-support`, `human-controlled` or `resolved`.
 
-- A Customer selects **Talk to a person** (`POST /api/chat/:businessId/conversations/:id/handoff` `{}`), or an automated turn fails because connected generation is unavailable. Either puts the conversation in the queue.
+- A Customer selects **Talk to a person** (`POST /api/chat/:businessId/conversations/:id/handoff` `{}`), an automated turn fails (see Workflow execution), or the workflow reaches a handoff step. Each puts the conversation in the queue.
 - An Operator can **Claim** a queued conversation. Claiming an automated conversation takes it over directly; an Operator must own a conversation before replying.
 - Every control change happens in one transaction, enforced by a database trigger whichever service makes it. It increments the conversation's execution generation, stops its queued and running automated turns (their late results are discarded), and posts the Customer notice: *Waiting for support*, *Support joined*, *Automated assistant resumed* or *Conversation resolved*. No notice promises a response time.
 - Customer messages sent while queued or under human control are stored with `turn_state: "human"` and never start an automated turn.
@@ -113,7 +146,7 @@ Each Business has one shared support queue. Every active Owner and Support Membe
 
 Operator inbox API (verified Operator session, same-origin):
 - `GET /api/businesses/:id/inbox`: your `operator_id`, active `members` (`email`, `role`, `available`) and up to 200 conversations with messages. The queue is listed first.
-- `GET /api/businesses/:id/inbox/conversations/:conversationId`: `control_state`, `assignee_id`/`assignee_email`, `handoff_reason` (`customer-request`, `operator-takeover`, `automation-failure`), `revision` and the full message history.
+- `GET /api/businesses/:id/inbox/conversations/:conversationId`: `control_state`, `assignee_id`/`assignee_email`, `handoff_reason` (`customer-request`, `operator-takeover`, `automation-failure`, `workflow-handoff`), `revision` and the full message history.
 - `POST /api/businesses/:id/inbox/availability` `{ "available": boolean }`.
 - `POST …/conversations/:conversationId/claim|resolve|resume` `{ "revision": "…" }`; `…/reassign` `{ "revision", "operator_id" }`; `…/messages` `{ "revision", "client_submission_id", "text" }`.
 
@@ -135,6 +168,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. The test overlay also starts a controlled HTTPS `fixture` service (provider and business endpoint, `tests/fixture/`, test-only self-signed CA) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.

@@ -1,4 +1,4 @@
-# Test-only short expiry; no test routes or alternate authorization.
+# Test-only short expiry and controlled external fixtures; no test routes or alternate authorization.
 services:
   app:
     environment:
@@ -9,3 +9,15 @@ services:
     environment:
       APP_MODE: test
       TEST_JOB_LEASE_SECONDS: '5'
+      # Agents whose model name is "fixture" call this provider; HTTP steps may reach *.fixture.test only.
+      TEST_PROVIDER_URL: https://provider.fixture.test/v1
+      TEST_CA_FILE: /fixture/cert.pem
+    volumes: [./tests/fixture/cert.pem:/fixture/cert.pem:ro]
+  fixture:
+    image: python:3.14.6-slim-bookworm@sha256:4c92ffcde4dd6f1ff72a24518f49fd4990b27134987dfa31a733badde66df9f8
+    command: [python, -u, /fixture/server.py]
+    volumes: [./tests/fixture:/fixture:ro]
+    ports: ['127.0.0.1:${FIXTURE_PORT:-3199}:8080']
+    networks:
+      internal: {aliases: [provider.fixture.test, orders.fixture.test]}
+      web: {}
