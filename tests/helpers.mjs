@@ -45,3 +45,13 @@ export async function account(prefix) {
   assert.equal(signup.status,200);
   return { request, email, password };
 }
+
+export async function invitationToken(email) {
+  for(let i=0;i<30;i++) {
+    const list=await fetch(mailBase+'/api/v1/messages').then(r=>r.json());
+    const message=list.messages.find(m=>m.Subject==='Business invitation'&&m.To.some(t=>t.Address===email));
+    if(message){const detail=await fetch(`${mailBase}/api/v1/message/${message.ID}`).then(r=>r.json());return detail.Text.match(/Invitation token: (\S+)/)[1];}
+    await new Promise(r=>setTimeout(r,100));
+  }
+  throw new Error('Invitation mail not received');
+}

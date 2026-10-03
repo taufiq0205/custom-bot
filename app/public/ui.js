@@ -1,4 +1,5 @@
 const status = document.querySelector('#status');
+let selectedBusiness=null;
 async function request(path, body) {
   const response = await fetch(path, {method: body ? 'POST' : 'GET', headers:{'Content-Type':'application/json'}, body:body?JSON.stringify(body):undefined});
   const data = await response.json();
@@ -16,8 +17,12 @@ async function refresh() {
   try {
     const businesses=await request('/api/businesses');
     workspace.hidden=false;
-    list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.textContent=`${b.name} — ${b.role}`;return li;}));
-  } catch {workspace.hidden=true;list.replaceChildren();}
+    list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.textContent=`${b.name} — ${b.role}`;
+      if(b.role==='Owner'){const button=document.createElement('button');button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{selectedBusiness=b;await refreshMemberships();}));li.append(button);}
+      return li;}));
+      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) selectedBusiness=null;
+    await refreshMemberships();
+  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;document.querySelector('#membership-panel').hidden=true;}
 }
 async function run(action) {
   const buttons=[...document.querySelectorAll('button')];
@@ -39,3 +44,40 @@ document.querySelector('#business').addEventListener('submit',event=>{
 });
 document.querySelector('#signout').addEventListener('click',()=>run(async()=>{await request('/api/auth/sign-out',{});document.querySelector('#account').reset();status.textContent='Signed out.';}));
 refresh();
+
+async function refreshMemberships() {
+  const panel=document.querySelector('#membership-panel');
+  panel.hidden=!selectedBusiness;
+  if(!selectedBusiness)return;
+  document.querySelector('#membership-title').textContent=`${selectedBusiness.name} Memberships`;
+  const path=`/api/businesses/${selectedBusiness.id}`;
+  const members=await request(path+'/memberships');
+  document.querySelector('#members').replaceChildren(...members.map(m=>{
+    const li=document.createElement('li');li.textContent=`${m.email} — ${m.role}${m.active?'':' (revoked)'}`;
+    if(m.active)for(const action of ['Change role','Revoke']){
+      const button=document.createElement('button');button.textContent=`${action}: ${m.email}`;
+      button.addEventListener('click',()=>run(async()=>{
+        await request(path+'/memberships/'+m.operator_id,{role:action==='Change role'?(m.role==='Owner'?'Support':'Owner'):m.role,active:action!=='Revoke',revision:m.revision});
+        status.textContent='Membership updated.';
+      }));li.append(button);
+    }
+    return li;
+  }));
+  const invitations=await request(path+'/invitations');
+  document.querySelector('#invitations').replaceChildren(...invitations.map(i=>{
+    const li=document.createElement('li');
+    const state=i.consumed_at?'accepted':i.revoked_at?'revoked':new Date(i.expires_at)<=new Date()?'expired':'pending';
+    li.textContent=`${i.email} — ${i.role} invitation (${state})`;
+    if(state==='pending'){const button=document.createElement('button');button.textContent=`Cancel invitation: ${i.email}`;
+      button.addEventListener('click',()=>run(async()=>{await request(path+'/invitations/'+i.id,{});status.textContent='Invitation cancelled.';}));li.append(button);}
+    return li;
+  }));
+}
+document.querySelector('#invite').addEventListener('submit',event=>{
+  event.preventDefault();const input=Object.fromEntries(new FormData(event.currentTarget));
+  run(async()=>{await request(`/api/businesses/${selectedBusiness.id}/invitations`,input);status.textContent='Invitation sent to the intended email.';});
+});
+document.querySelector('#accept-invitation').addEventListener('submit',event=>{
+  event.preventDefault();const token=new FormData(event.currentTarget).get('token');
+  run(async()=>{await request('/api/invitations/accept',{token});event.target.reset();status.textContent='Invitation accepted.';});
+});

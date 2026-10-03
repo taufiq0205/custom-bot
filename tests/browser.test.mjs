@@ -36,3 +36,45 @@ test('browser: register, verify, sign in, create Owner Business, recover, sign o
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
 });
+test('browser: invite, accept, promote/demote, cancel, revoke; Support UI hides management',async()=>{
+ const {account,invitationToken}=await import('./helpers.mjs');
+ const owner=await account('browser-members-owner'),target=await account('browser-members-target');
+ for(const a of [owner,target]){
+  assert.equal((await a.request('/api/auth/email-otp/verify-email',{email:a.email,otp:await otp(a.email,'email-verification')})).status,200);
+ }
+ const browser=await chromium.launch();
+ const ownerPage=await browser.newPage({viewport:{width:390,height:844}}),targetPage=await browser.newPage({viewport:{width:390,height:844}});
+ const errors=[];for(const p of [ownerPage,targetPage])p.on('pageerror',e=>errors.push(e.message));
+ const signIn=async(p,a)=>{await p.goto(base);await p.getByLabel('Email',{exact:true}).fill(a.email);await p.getByLabel('Password',{exact:true}).fill(a.password);await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.getByText('Signed in.',{exact:true}).waitFor();await p.getByLabel('Business name').waitFor();};
+ try {
+  await signIn(ownerPage,owner);await signIn(targetPage,target);
+  await ownerPage.getByLabel('Business name').fill('Browser Memberships');
+  await ownerPage.getByRole('button',{name:'Create Business as Owner'}).click();
+  await ownerPage.getByRole('button',{name:'Manage Browser Memberships'}).click();
+  await ownerPage.getByLabel('Invite email').fill(target.email);
+  await ownerPage.getByRole('button',{name:'Send invitation',exact:true}).click();
+  await ownerPage.getByText('Invitation sent to the intended email.',{exact:true}).waitFor();
+  await targetPage.getByLabel('Invitation token').fill(await invitationToken(target.email));
+  await targetPage.getByRole('button',{name:'Accept invitation',exact:true}).click();
+  await targetPage.getByText('Browser Memberships — Support',{exact:true}).waitFor();
+  assert.equal(await targetPage.getByRole('button',{name:'Manage Browser Memberships'}).count(),0);
+  await ownerPage.getByRole('button',{name:'Manage Browser Memberships'}).click();
+  await ownerPage.getByRole('button',{name:`Change role: ${target.email}`,exact:true}).click();
+  await ownerPage.locator('#members li').filter({hasText:`${target.email} — Owner`}).waitFor();
+  await targetPage.reload();await targetPage.getByRole('button',{name:'Manage Browser Memberships'}).waitFor();
+  await ownerPage.getByRole('button',{name:`Change role: ${target.email}`,exact:true}).click();
+  await ownerPage.locator('#members li').filter({hasText:`${target.email} — Support`}).waitFor();
+  await ownerPage.getByLabel('Invite email').fill('cancelled-'+crypto.randomUUID()+'@example.test');
+  await ownerPage.getByRole('button',{name:'Send invitation',exact:true}).click();
+  const cancel=ownerPage.getByRole('button',{name:/Cancel invitation:/});await cancel.waitFor();await cancel.click();
+  await ownerPage.getByText('Invitation cancelled.',{exact:true}).waitFor();
+  await ownerPage.getByRole('button',{name:`Revoke: ${target.email}`,exact:true}).click();
+  await ownerPage.getByText(`${target.email} — Support (revoked)`,{exact:true}).waitFor();
+  await targetPage.reload();await targetPage.getByLabel('Business name').waitFor();
+  assert.equal(await targetPage.getByText('Browser Memberships — Support',{exact:true}).count(),0);
+  await ownerPage.getByRole('button',{name:`Revoke: ${owner.email}`,exact:true}).click();
+  await ownerPage.getByText('Keep at least one active Owner',{exact:true}).waitFor();
+  for(const p of [ownerPage,targetPage])assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.deepEqual(errors,[]);
+ } finally {await browser.close();}
+});

@@ -10,7 +10,16 @@ test('browser: repeated signup explains original password and recovery without r
   await page.goto(base);
   await page.getByLabel('Email',{exact:true}).fill(email);
   await page.getByLabel('Password',{exact:true}).fill('Different-fixture-password-938!');
-  await page.getByRole('button',{name:'Create account',exact:true}).click();
+  const signup=async()=>{
+   const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/auth/sign-up/email');
+   await page.getByRole('button',{name:'Create account',exact:true}).click();return response;
+  };
+  let response=await signup();
+  if(response.status()===429){
+   await new Promise(r=>setTimeout(r,1000*(Number(response.headers()['retry-after'])||10)+100));
+   response=await signup();
+  }
+  assert.equal(response.status(),200);
   await page.getByRole('status').filter({hasText:'Already registered?'}).waitFor({timeout:3000});
   await page.getByLabel('One-time code').fill(await otp(email,'email-verification'));
   await page.getByRole('button',{name:'Verify email',exact:true}).click();

@@ -54,7 +54,13 @@ test('Docker: restart persistence, private services, guarded migrations, seed id
  await request('/api/auth/sign-in/email',{email,password});
  const created=await request('/api/businesses',{name:'Preserved Business'});
  assert.equal(created.status,201);
+ const membershipPath='/api/businesses/'+created.data.id;
+ const membershipsBefore=(await request(membershipPath+'/memberships')).data;
+ assert.equal((await request(membershipPath+'/invitations',{email:`restart-${crypto.randomUUID()}@example.test`,role:'Support'})).status,201);
+ const invitationsBefore=(await request(membershipPath+'/invitations')).data;
  compose('restart','db','worker','app');await ready();
+ assert.deepEqual((await request(membershipPath+'/memberships')).data,membershipsBefore);
+ assert.deepEqual((await request(membershipPath+'/invitations')).data,invitationsBefore);
  assert.equal((await request('/api/businesses/'+created.data.id)).data.name,'Preserved Business');
  const login=await client();
  assert.equal((await login('/api/auth/sign-in/email',{email,password})).status,200);

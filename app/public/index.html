@@ -41,6 +41,20 @@
 </label>
 <button>Create Business as Owner</button>
 </form>
+<form id="accept-invitation">
+<label>Invitation token <input name="token" required minlength="64" maxlength="64" autocomplete="off"></label>
+<button>Accept invitation</button>
+</form>
+<section id="membership-panel" hidden>
+<h2 id="membership-title">Business Memberships</h2>
+<ul id="members"></ul>
+<form id="invite">
+<label>Invite email <input name="email" type="email" required maxlength="254"></label>
+<label>Invite role <select name="role"><option>Support</option><option>Owner</option></select></label>
+<button>Send invitation</button>
+</form>
+<ul id="invitations"></ul>
+</section>
 <button id="signout">Sign out</button>
 </section>
 </main>

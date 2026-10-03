@@ -10,7 +10,7 @@ export const origin = new URL(required('APP_URL')).origin;
 if (mode === 'hosted' && !origin.startsWith('https://')) throw new Error('Hosted APP_URL requires HTTPS');
 export const secret = required('BETTER_AUTH_SECRET');
 if (secret.length < 32) throw new Error('BETTER_AUTH_SECRET must have at least 32 characters');
-if (mode !== 'test' && process.env.TEST_OTP_TTL) throw new Error('TEST_OTP_TTL is test-only');
+if (mode !== 'test' && (process.env.TEST_OTP_TTL || process.env.TEST_INVITATION_TTL)) throw new Error('Test TTL controls are test-only');
 export const pool = new Pool({connectionString: required('DATABASE_URL'), max: 10, connectionTimeoutMillis: 5000});
 pool.on('error', () => console.error('Database connection lost; check PostgreSQL'));
 export const smtpHost = required('SMTP_HOST');

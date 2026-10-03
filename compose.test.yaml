@@ -4,3 +4,4 @@ services:
     environment:
       APP_MODE: test
       TEST_OTP_TTL: '8'
+      TEST_INVITATION_TTL: '20'
