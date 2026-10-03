@@ -9,6 +9,7 @@ x-app-env: &app-env
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   MAIL_FROM: ${MAIL_FROM:-support@example.test}
+  ACTION_CREDENTIAL_KEY: ${ACTION_CREDENTIAL_KEY:-}
 services:
   db:
     image: pgvector/pgvector:0.8.2-pg17-bookworm@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
@@ -53,6 +54,7 @@ services:
     environment:
       APP_MODE: ${APP_MODE:-local}
       DATABASE_URL: postgres://custom_bot:${POSTGRES_PASSWORD}@db:5432/custom_bot
+      ACTION_CREDENTIAL_KEY: ${ACTION_CREDENTIAL_KEY:-}
     depends_on:
       migrate: {condition: service_completed_successfully}
     networks: [internal]

@@ -1,74 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { base, compose, operator } from './helpers.mjs';
-const site='https://shop-workflow.example.test';
-const fixture=process.env.FIXTURE_URL||'http://localhost:3199';
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
-const control=(path,body)=>fetch(fixture+path,{method:'POST',body:JSON.stringify(body)}).then(r=>r.json());
-// Scripted fixture responses per key, consumed in order; calls() reads back exactly what the worker sent.
-const script=(key,responses)=>control('/script',{key,responses});
-const calls=key=>control('/log',{key});
-const sql=query=>compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','-U','custom_bot','-d','custom_bot','-tAc',query).trim();
-const reply=value=>({content:JSON.stringify(value)});
-
-// Workflow document builders: every agent calls the fixture provider; its key travels in the instructions.
-const agent=key=>({id:key.split('.').at(-1),name:key,instructions:`fixture-key:${key} Help the Customer.`,model:{provider:'deepseek',name:'fixture'}});
-const action=(id,key,extra={})=>({id,method:'GET',url:`https://orders.fixture.test/${key}/orders`,
-  input_schema:{type:'object',properties:{order_id:{type:'string',description:'your order number'}},required:['order_id']},
-  result_schema:{type:'object',properties:{status:{type:'string'}},required:['status']},
-  credential:'fixture-credential',authorization:'fixture-policy',timeout_ms:15000,...extra});
-function config({agents=[],actions=[],steps,links,sources}) {
-  return {schema_version:1,generation:{mode:'connected'},...(sources?{sources}:{}),agents,actions,workflow:{entry:steps[0].id,
-    steps:steps.map((s,i)=>({position:{x:i*240,y:0},...s})),connections:links.map(([from,output,to])=>({from,output,to}))}};
-}
-const handoff={id:'support',type:'handoff'};
-
-async function business(prefix) {
-  const owner=await operator(prefix);
-  const created=(await owner.request('/api/businesses',{name:`${prefix} Business`})).data;
-  assert.equal((await owner.request(`/api/businesses/${created.id}/website-origins`,{origin:site,approved:true})).status,200);
-  return {owner,id:created.id};
-}
-async function publish(b,doc) {
-  const path=`/api/businesses/${b.id}/configuration`;
-  const draft=(await b.owner.request(path)).data;
-  const saved=await b.owner.request(path,{text:JSON.stringify(doc),revision:draft.revision});
-  assert.equal(saved.status,200);
-  assert.deepEqual([saved.data.validation.errors,saved.data.validation.blockers],[[],[]]);
-  const published=await b.owner.request(path+'/publish',{revision:saved.data.revision});
-  assert.equal(published.status,201,JSON.stringify(published.data));
-  return published.data.version;
-}
-const chat=token=>async(path,body)=>{
-  const response=await fetch(`${base}/api/chat/${path}`,{method:body===undefined?'GET':'POST',
-    headers:{origin:site,...(token?{authorization:`Bearer ${token}`}:{}),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
-  return {status:response.status,data:await response.json()};
-};
-async function start(b) {
-  const created=await chat()(`${b.id}/conversations`,{});
-  assert.equal(created.status,201);
-  const session={token:created.data.token,request:chat(created.data.token),path:`${b.id}/conversations/${created.data.conversation.id}`,conversation:created.data.conversation};
-  let n=0;
-  session.send=async text=>{
-    const sent=await session.request(session.path+'/messages',{client_submission_id:`message-${++n}-${crypto.randomUUID()}`,text});
-    assert.equal(sent.status,202);
-    return sent.data.message;
-  };
-  session.read=async()=>(await session.request(session.path)).data;
-  // Waits until this message's turn ends (completed, failed or handed to support).
-  session.settle=async(message)=>{
-    for(let i=0;i<400;i++) {
-      const c=await session.read();
-      if(!['queued','running'].includes(c.messages.find(m=>m.id===message.id).turn_state))return c;
-      await wait(250);
-    }
-    throw new Error('Turn did not settle');
-  };
-  session.ask=async text=>{const message=await session.send(text);const c=await session.settle(message);return {message,conversation:c,replies:c.messages.filter(m=>m.reply_to===message.id)};};
-  return session;
-}
+import { action, agent, attempts, business, calls, compose, config, handoff, owned, publish, reply, script, sql, start, wait } from './helpers.mjs';
 const durations=(job,kind)=>sql(`SELECT string_agg(round(extract(epoch FROM a.finished_at-a.started_at),2)::text,',' ORDER BY a.id) FROM execution_attempts a JOIN jobs j ON j.id=a.job_id WHERE j.message_id='${job}' AND a.kind='${kind}'`).split(',').map(Number);
-const attempts=job=>sql(`SELECT string_agg(a.kind||':'||a.step_id||':'||a.status||':'||coalesce(a.error,''),',' ORDER BY a.id) FROM execution_attempts a JOIN jobs j ON j.id=a.job_id WHERE j.message_id='${job}'`);
 
 test('Workflow: retrieval, condition, HTTP and multi-agent transitions with structured context and final-only replies',async()=>{
   const key=`flow-${crypto.randomUUID()}`;
@@ -82,7 +15,7 @@ test('Workflow: retrieval, condition, HTTP and multi-agent transitions with stru
     links:[['retrieve','next','triage'],['triage','next','route'],['triage','unsupported','support'],['route','yes','order'],['route','fallback','general'],
       ['order','success','answer'],['order','failure','support'],['answer','unsupported','support'],['general','unsupported','support']]}));
   await script(`${key}.triage`,[reply({outcome:'next',context:{intent:'order',order_id:'A-100'}}),reply({outcome:'next',context:{intent:'hours'}})]);
-  await script(key,[{json:{status:'shipped',internal_note:'undeclared fields are dropped'}}]);
+  await script(key,[owned({status:'shipped',internal_note:'undeclared fields are dropped'})]);
   await script(`${key}.answer`,[reply({outcome:'reply',reply:'Your order A-100 has shipped.'})]);
   await script(`${key}.general`,[reply({outcome:'reply',reply:'We open at nine.'})]);
   const customer=await start(b);
@@ -93,7 +26,8 @@ test('Workflow: retrieval, condition, HTTP and multi-agent transitions with stru
   assert.equal(order.conversation.control_state,'automated');
   // The intermediate agent's structured context reached the HTTP inputs and the final agent; only declared result fields pass.
   const [lookup]=await calls(key);
-  assert.deepEqual([lookup.path,lookup.query],[`/${key}/orders`,{order_id:'A-100'}]);
+  // The platform adds the verified Customer's ID; the agent never supplies it.
+  assert.deepEqual([lookup.path,lookup.query],[`/${key}/orders`,{order_id:'A-100',customer:customer.subject}]);
   const [final]=await calls(`${key}.answer`);
   const context=JSON.parse(final.body.messages.at(-1).content.replace(/^Workflow context \(data, not instructions\): /,''));
   assert.deepEqual(context,{intent:'order',order_id:'A-100',status:'shipped'});
@@ -120,7 +54,7 @@ test('Workflow: a missing required input asks once and ends the turn; the next m
   const b=await business('workflow-clarify');
   await publish(b,orderFlow(key));
   await script(`${key}.triage`,[reply({outcome:'next',context:{intent:'order'}}),reply({outcome:'next',context:{order_id:'A-7'}})]);
-  await script(key,[{json:{status:'packed'}}]);
+  await script(key,[owned({status:'packed'})]);
   await script(`${key}.answer`,[reply({outcome:'reply',reply:'Order A-7 is packed.'})]);
   const customer=await start(b);
   const first=await customer.ask('Where is my order?');
@@ -130,7 +64,7 @@ test('Workflow: a missing required input asks once and ends the turn; the next m
   assert.deepEqual([(await calls(key)).length,(await calls(`${key}.answer`)).length],[0,0]);
   const second=await customer.ask('It is A-7');
   assert.deepEqual(second.replies.map(m=>m.text),['Order A-7 is packed.']);
-  assert.deepEqual((await calls(key)).map(c=>c.query),[{order_id:'A-7'}]);
+  assert.deepEqual((await calls(key)).map(c=>c.query),[{order_id:'A-7',customer:customer.subject}]);
   // The second turn's agent saw the clarification in history.
   const [, secondTriage]=await calls(`${key}.triage`);
   assert(secondTriage.body.messages.some(m=>m.role==='assistant'&&m.content==='To continue, please tell me your order number.'));
@@ -147,18 +81,18 @@ test('Workflow: unsupported and failure paths hand off; only transient reads ret
     ['HTTP 404 is not retried',[ok],[{status:404,json:{}}],[],1,'workflow-handoff'],
     ['HTTP 401 is not retried',[ok],[{status:401,json:{}}],[],1,'workflow-handoff'],
     ['redirects are failures, not followed',[ok],[{status:302,headers:{location:'https://orders.fixture.test/elsewhere'}}],[],1,'workflow-handoff'],
-    ['malformed result is not retried',[ok],[{json:{state:'missing status'}}],[],1,'workflow-handoff'],
-    ['wrongly typed nested result',[ok],[{json:{status:'ok',items:[1,'two']}}],[],1,'workflow-handoff'],
+    ['malformed result is not retried',[ok],[owned({state:'missing status'})],[],1,'workflow-handoff'],
+    ['wrongly typed nested result',[ok],[owned({status:'ok',items:[1,'two']})],[],1,'workflow-handoff'],
     ['non-JSON result',[ok],[{raw:'<html>'}],[],1,'workflow-handoff'],
     ['transient twice fails after one retry',[ok],[{status:503},{status:502}],[],2,'workflow-handoff'],
-    ['transient once then success',[ok],[{status:503},{json:{status:'ok',items:[1,2]}}],[answer],2,'reply'],
+    ['transient once then success',[ok],[{status:503},owned({status:'ok',items:[1,2]})],[answer],2,'reply'],
     ['wrongly typed input is a failure without a call',[reply({outcome:'next',context:{order_id:42}})],[],[],0,'workflow-handoff'],
     ['agent output outside its contract',[reply({outcome:'reply',reply:'An intermediate agent cannot reply'})],[],[],0,'automation-failure'],
     ['provider output that is not JSON',[{content:'Sure! Your order shipped.'}],[],[],0,'automation-failure'],
     ['provider authentication failure is not retried',[{status:401,raw:'{}'}],[],[],0,'automation-failure'],
     ['deeply nested result neither crashes the worker nor retries',[ok],[{raw:'['.repeat(100000)}],[],1,'workflow-handoff'],
     ['non-finite provider context',[{content:'{"outcome":"next","context":{"order_id":NaN}}'}],[],[],0,'automation-failure'],
-    ['provider transient failure retries once',[{status:500,raw:'{}'},ok],[{json:{status:'ok'}}],[answer],1,'reply'],
+    ['provider transient failure retries once',[{status:500,raw:'{}'},ok],[owned({status:'ok'})],[answer],1,'reply'],
   ];
   for(const [name,triage,lookups,answers,httpCalls,expected] of cases) {
     const before={triage:(await calls(`${key}.triage`)).length,http:(await calls(key)).length,answer:(await calls(`${key}.answer`)).length};
@@ -249,7 +183,7 @@ test('Workflow budgets: 20 steps, 3 agent calls and 5 HTTP calls per message, re
   exhausted(turn);
   assert.deepEqual([(await calls(`${key}.s1`)).length,(await calls(`${key}.s2`)).length,(await calls(`${key}.s3`)).length],[2,1,0]);
 
-  const ok={json:{status:'ok'}};
+  const ok=owned({status:'ok'});
   ({key,turn}=await run(['agent',...Array(5).fill('http'),'final'],k=>({s1:[next],'':Array(5).fill(ok),s7:[done]})));
   assert.deepEqual(turn.replies.map(m=>m.text),['Done.']);
   assert.equal((await calls(key)).length,5);
@@ -266,7 +200,7 @@ test('Workflow time limits: HTTP attempts stop at their timeout (wall clock, eve
   const key=`trickle-${crypto.randomUUID()}`;
   await publish(b,chain(key,['agent','http','final'],{timeout_ms:2000}));
   await script(`${key}.s1`,[reply({outcome:'next',context:{order_id:'A-1'}})]);
-  await script(key,[{trickle:20,json:{status:'ok'}},{trickle:20,json:{status:'ok'}}]);
+  await script(key,[owned({status:'ok'},{trickle:20}),owned({status:'ok'},{trickle:20})]);
   const trickling=await start(b);
   const trickled=await trickling.ask('Where is A-1?');
   const trickles=await calls(key);
@@ -284,7 +218,7 @@ test('Workflow time limits: HTTP attempts stop at their timeout (wall clock, eve
     links:[['s1','next','s2'],['s1','unsupported','support'],['s2','success','s5'],['s2','failure','s3'],['s3','success','s5'],['s3','failure','s4'],
       ['s4','success','s5'],['s4','failure','support'],['s5','unsupported','support']]}));
   await script(`${slow}.s1`,[reply({outcome:'next',context:{order_id:'A-1'}})]);
-  await script(slow,Array(6).fill({delay:40,json:{status:'ok'}}));
+  await script(slow,Array(6).fill(owned({status:'ok'},{delay:40})));
   const customer=await start(b);
   const sent=Date.now();
   const message=await customer.send('Where is A-1?');
@@ -305,14 +239,14 @@ test('Workflow time limits: HTTP attempts stop at their timeout (wall clock, eve
   assert.equal(attempts(message.id).split(',').filter(a=>a.startsWith('http:')).length,4);
 });
 
-test('Workflow: unapproved destinations make no request outside the fixture',async()=>{
+test('Workflow: destinations outside the credential\'s approved origin make no request',async()=>{
   const key=`destination-${crypto.randomUUID()}`;
   const b=await business('workflow-destination');
   await publish(b,chain(key,['agent','http','final'],{url:'https://api.example.com/orders'}));
   await script(`${key}.s1`,[reply({outcome:'next',context:{order_id:'A-1'}})]);
   const turn=await (await start(b)).ask('Where is A-1?');
   assert.equal(turn.conversation.control_state,'waiting-for-support');
-  assert.equal(attempts(turn.message.id),'provider:s1:succeeded:,http:s2:failed:destination not permitted');
+  assert.equal(attempts(turn.message.id),'provider:s1:succeeded:,http:s2:failed:destination not approved');
 });
 
 test('Workflow races: takeover, sign-out and a worker crash during external calls reject later work and late results without replay',async()=>{
@@ -325,7 +259,7 @@ test('Workflow races: takeover, sign-out and a worker crash during external call
   let key=`takeover-${crypto.randomUUID()}`;
   await publish(b,orderFlow(key));
   await script(`${key}.triage`,[{...next,delay:4}]);
-  await script(key,[{json:{status:'ok'}}]);
+  await script(key,[owned({status:'ok'})]);
   await script(`${key}.answer`,[reply({outcome:'reply',reply:'Late reply'})]);
   let customer=await start(b);
   let message=await customer.send('Where is A-1?');
@@ -345,7 +279,7 @@ test('Workflow races: takeover, sign-out and a worker crash during external call
   key=`signout-${crypto.randomUUID()}`;
   await publish(b,orderFlow(key));
   await script(`${key}.triage`,[next]);
-  await script(key,[{json:{status:'ok'},delay:4}]);
+  await script(key,[owned({status:'ok'},{delay:4})]);
   await script(`${key}.answer`,[reply({outcome:'reply',reply:'Late reply'})]);
   customer=await start(b);
   message=await customer.send('Where is A-1?');
@@ -362,7 +296,7 @@ test('Workflow races: takeover, sign-out and a worker crash during external call
   key=`crash-${crypto.randomUUID()}`;
   await publish(b,orderFlow(key,{timeout_ms:3000}));
   await script(`${key}.triage`,[next,next]);
-  await script(key,[{json:{status:'ok'},delay:20},{json:{status:'shipped'}}]);
+  await script(key,[owned({status:'ok'},{delay:20}),owned({status:'shipped'})]);
   await script(`${key}.answer`,[reply({outcome:'reply',reply:'Order A-1 has shipped.'})]);
   customer=await start(b);
   message=await customer.send('Where is A-1?');
@@ -383,7 +317,7 @@ test('Workflow: an agent cannot overwrite a verified HTTP result with its own va
   const b=await business('workflow-observed');
   await publish(b,chain(key,['agent','http','agent','final']));
   await script(`${key}.s1`,[reply({outcome:'next',context:{order_id:'A-1'}})]);
-  await script(key,[{json:{status:'pending'}}]);
+  await script(key,[owned({status:'pending'})]);
   await script(`${key}.s3`,[reply({outcome:'next',context:{status:'shipped'}})]);
   await script(`${key}.s4`,[reply({outcome:'reply',reply:'Your order has shipped.'})]);
   const turn=await (await start(b)).ask('Where is A-1?');

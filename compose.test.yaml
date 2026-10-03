@@ -5,19 +5,26 @@ services:
       APP_MODE: test
       TEST_OTP_TTL: '8'
       TEST_INVITATION_TTL: '20'
+      # Test-only synthetic key; it protects nothing. Real deployments set their own outside the database.
+      ACTION_CREDENTIAL_KEY: 7e57000000000000000000000000000000000000000000000000000000007e57
   worker:
     environment:
       APP_MODE: test
       TEST_JOB_LEASE_SECONDS: '5'
-      # Agents whose model name is "fixture" call this provider; HTTP steps may reach *.fixture.test only.
+      # Agents whose model name is "fixture" call this provider. Business HTTP steps take the production checks.
       TEST_PROVIDER_URL: https://provider.fixture.test/v1
       TEST_CA_FILE: /fixture/cert.pem
+      ACTION_CREDENTIAL_KEY: 7e57000000000000000000000000000000000000000000000000000000007e57
+      # Only these exact fixture names may resolve to the private Docker network; internal.fixture.test (same server) may not.
+      TEST_PUBLIC_HOSTS: orders.fixture.test,other.fixture.test
     volumes: [./tests/fixture/cert.pem:/fixture/cert.pem:ro]
+    # Approved-looking names that resolve to loopback, cloud-metadata link-local and private addresses.
+    extra_hosts: ['loopback.fixture.test:127.0.0.1', 'metadata.fixture.test:169.254.169.254', 'private.fixture.test:10.255.255.1']
   fixture:
     image: python:3.14.6-slim-bookworm@sha256:4c92ffcde4dd6f1ff72a24518f49fd4990b27134987dfa31a733badde66df9f8
     command: [python, -u, /fixture/server.py]
     volumes: [./tests/fixture:/fixture:ro]
     ports: ['127.0.0.1:${FIXTURE_PORT:-3199}:8080']
     networks:
-      internal: {aliases: [provider.fixture.test, orders.fixture.test]}
+      internal: {aliases: [provider.fixture.test, orders.fixture.test, other.fixture.test, internal.fixture.test]}
       web: {}

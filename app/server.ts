@@ -8,6 +8,7 @@ import { memberships } from './memberships.js';
 import { chat } from './chat.js';
 import { configuration } from './configuration.js';
 import { inbox } from './inbox.js';
+import { actions } from './actions.js';
 const authHandler = toNodeHandler(auth);
 const endpoints = new Set(['sign-up/email','sign-in/email','sign-out','get-session','email-otp/send-verification-otp','email-otp/verify-email','email-otp/request-password-reset','email-otp/reset-password']);
 createServer(async (req,res) => {
@@ -40,6 +41,7 @@ createServer(async (req,res) => {
       if (await memberships(req,path,session.user,json)) return;
       if (await configuration(req,path,session.user,json)) return;
       if (await inbox(req,path,session.user,json)) return;
+      if (await actions(req,path,session.user,json)) return;
       if (path === '/api/businesses' && req.method === 'GET') {
         const result = await pool.query('SELECT b.id,b.name,m.role FROM businesses b JOIN memberships m ON m.business_id=b.id WHERE m.operator_id=$1 AND m.active=true ORDER BY b.created_at,b.id', [session.user.id]);
         return json(200,result.rows);

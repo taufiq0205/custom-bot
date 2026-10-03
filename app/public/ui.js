@@ -188,6 +188,11 @@ async function loadConversation(polled=false) {
   document.querySelector('#inbox-meta').textContent=`${states[c.control_state]}${c.assignee_email?`, assigned to ${mine?'you':c.assignee_email}`:''}${c.handoff_reason?`. Reason: ${c.handoff_reason}`:''}. ${c.verified?'Verified Customer':'Anonymous Customer'}.`;
   const who=m=>m.author==='customer'?'Customer':m.author==='operator'?`Support (${m.operator_email})`:m.author==='system'?'Notice':m.simulated?'Simulated assistant':'Assistant';
   document.querySelector('#inbox-messages').replaceChildren(...c.messages.map(m=>Object.assign(document.createElement('li'),{textContent:`${who(m)}: ${m.text}`})));
+  // External data: text only.
+  const value=v=>v!==null&&typeof v==='object'?JSON.stringify(v):String(v);
+  document.querySelector('#inbox-lookups').replaceChildren(...(c.lookups.length?c.lookups.map(l=>Object.assign(document.createElement('li'),
+    {textContent:`${l.action_id}, observed ${new Date(l.observed_at).toLocaleString()}: ${Object.entries(l.result).map(([k,v])=>`${k}: ${value(v)}`).join(', ')}`}))
+    :[Object.assign(document.createElement('li'),{textContent:'None'})]));
 }
 const act=(action,body={})=>request(`${inboxPath()}/conversations/${opened.id}/${action}`,{revision:opened.revision,...body});
 const control=(action,message,input=()=>({}))=>()=>run(async()=>{if(!opened)return;await act(action,input());await loadConversation();await loadInbox();status_(message);});

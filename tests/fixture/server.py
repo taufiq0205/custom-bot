@@ -51,6 +51,9 @@ class Fixture(BaseHTTPRequestHandler):
         raw = script.get('raw')
         if raw is None and kind == 'provider':
             raw = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': script['content']}}]})
+        if raw is None and script.get('owner'):
+            # The requesting Customer's own record: copy the platform-supplied customer parameter into the owner field.
+            raw = json.dumps({**script['json'], script['owner']: entry['query'].get('customer')})
         if raw is None:
             raw = json.dumps(script.get('json', {}))
         data = raw.encode()
