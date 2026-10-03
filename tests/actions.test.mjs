@@ -27,6 +27,43 @@ const step=shape=>shape==='explicit'?'order':'helper';
 let shared;
 const owner=async()=>shared??=await operator('actions-owner');
 
+// Runs first: its sign-ups stay clear of the next file's (Better Auth allows 3 sign-ups per 10 s, and a browser cannot wait out a 429).
+test('browser: Support sees a completed authorized lookup as a timestamped historical observation',async()=>{
+  const o=await owner();
+  const b=await business('actions-browser',{owner:o});
+  const support=await operator('actions-support');
+  assert.equal((await o.request(`/api/businesses/${b.id}/invitations`,{email:support.email,role:'Support'})).status,201);
+  assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
+  // Support has no access to action controls.
+  assert.equal((await support.request(b.controls('action-controls'))).status,404);
+  const key=`browser-${crypto.randomUUID()}`;
+  await publish(b,explicit(key));
+  await agents(key,'explicit');
+  await script(key,[owned({status:'<b>shipped</b>',internal_note:'hidden'})]);
+  const customer=await start(b);
+  await customer.ask('Where is A-1?');
+  assert.equal((await customer.request(`${b.id}/conversations/${customer.conversation.id}/handoff`,{})).status,200);
+  const browser=await chromium.launch();
+  try {
+    const page=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(base);
+    await page.getByLabel('Email',{exact:true}).fill(support.email);
+    await page.getByLabel('Password',{exact:true}).fill(support.password);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await page.getByText('Signed in.',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Open inbox actions-browser Business'}).click();
+    await page.getByRole('button',{name:/^Open conversation /}).click();
+    await page.getByText(/^Historical observations: each shows what the business API returned at that time/).waitFor();
+    const item=page.locator('#inbox-lookups li',{hasText:/^lookup, observed .+: status: <b>shipped<\/b>$/});
+    await item.waitFor();
+    assert.equal(await page.locator('#inbox-lookups b').count(),0,'external data is rendered as text');
+    assert.doesNotMatch(await item.textContent(),/hidden|customer/);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    assert.deepEqual(errors,[]);
+  } finally {await browser.close();}
+});
+
 test('Actions: an owned order succeeds through both paths with the Business credential and the platform-supplied Customer ID',async()=>{
   const b=await business('actions-owned',{owner:await owner()});
   for(const shape of ['explicit','requested']) {
@@ -289,40 +326,4 @@ test('Actions: credentials are encrypted with a key outside the database and nev
   for(const value of [b.secret,keyHex])assert.equal(logs.includes(value),false);
   // Malformed keys stop startup instead of silently disabling credentials.
   assert.throws(()=>compose('run','--rm','--no-deps','-e','ACTION_CREDENTIAL_KEY=short','worker'),e=>e.stderr.includes('64 hex characters'));
-});
-
-test('browser: Support sees a completed authorized lookup as a timestamped historical observation',async()=>{
-  const o=await owner();
-  const b=await business('actions-browser',{owner:o});
-  const support=await operator('actions-support');
-  assert.equal((await o.request(`/api/businesses/${b.id}/invitations`,{email:support.email,role:'Support'})).status,201);
-  assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
-  // Support has no access to action controls.
-  assert.equal((await support.request(b.controls('action-controls'))).status,404);
-  const key=`browser-${crypto.randomUUID()}`;
-  await publish(b,explicit(key));
-  await agents(key,'explicit');
-  await script(key,[owned({status:'<b>shipped</b>',internal_note:'hidden'})]);
-  const customer=await start(b);
-  await customer.ask('Where is A-1?');
-  assert.equal((await customer.request(`${b.id}/conversations/${customer.conversation.id}/handoff`,{})).status,200);
-  const browser=await chromium.launch();
-  try {
-    const page=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();
-    const errors=[];page.on('pageerror',e=>errors.push(e.message));
-    await page.goto(base);
-    await page.getByLabel('Email',{exact:true}).fill(support.email);
-    await page.getByLabel('Password',{exact:true}).fill(support.password);
-    await page.getByRole('button',{name:'Sign in',exact:true}).click();
-    await page.getByText('Signed in.',{exact:true}).waitFor();
-    await page.getByRole('button',{name:'Open inbox actions-browser Business'}).click();
-    await page.getByRole('button',{name:/^Open conversation /}).click();
-    await page.getByText(/^Historical observations: each shows what the business API returned at that time/).waitFor();
-    const item=page.locator('#inbox-lookups li',{hasText:/^lookup, observed .+: status: <b>shipped<\/b>$/});
-    await item.waitFor();
-    assert.equal(await page.locator('#inbox-lookups b').count(),0,'external data is rendered as text');
-    assert.doesNotMatch(await item.textContent(),/hidden|customer/);
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-    assert.deepEqual(errors,[]);
-  } finally {await browser.close();}
 });
