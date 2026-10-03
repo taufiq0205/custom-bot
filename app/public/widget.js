@@ -35,8 +35,8 @@
   const label = m => m.author === 'customer' ? 'You' : m.author === 'system' ? 'Notice' : m.simulated ? 'Simulated assistant' : 'Assistant';
   function render(conversation) {
     notice.textContent = (conversation.mode === 'simulation'
-      ? 'Simulation mode: replies are simulated. No AI model is used, and replies contain no business facts.'
-      : 'Assistant replies may be generated.') + ` Configuration version ${conversation.configuration_version}.`;
+      ? 'Simulation mode: replies are simulated. No AI model is used, and replies contain no business facts. ' : '')
+      + `Configuration version ${conversation.configuration_version}.`;
     log.replaceChildren(...conversation.messages.map(m => el('li', {},
       el('strong', {textContent: `${label(m)}: `}), m.text,
       m.turn_state === 'queued' || m.turn_state === 'running' ? ' (waiting for reply)' : m.turn_state === 'failed' ? ' (not answered)' : '')));

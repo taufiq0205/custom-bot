@@ -14,6 +14,7 @@ export COMPOSE_PROJECT_NAME=custom-bot-chat-validation APP_URL=http://localhost:
 COMPOSE_FILE=compose.yaml:compose.test.yaml:ports-15.yaml docker compose up --build -d --wait
 node --test tests/chat.test.mjs
 node --test tests/browser.test.mjs
+sleep 61   # let Better Auth's per-IP auth limits reset; test helpers retry a 429 only once
 npm test
 ```
 
@@ -36,7 +37,7 @@ services:
 | Anonymous sessions access only their own conversations on Business-approved origins | `chat.test.mjs` origins group: Owner-only origin approval (Support 404), malformed/path/credentialed/overlong origins 400; unapproved, missing Origin and unknown Business all 403 without CORS headers; preflight allowed only for approved origin; a second session cannot list, read or post to the first session's conversations (404); forged token 401; Business A token rejected on Business B even from B's approved origin (401); withdrawing an origin cuts off an existing session and re-approval restores it. Browser journey: a separate fixture website origin shows chat, a second browser context sees none of the first Customer's history, an unapproved origin shows chat unavailable. Composite `(business_id, …)` foreign keys bind sessions, conversations, messages, jobs and configuration versions to one Business. |
 | Duplicate submission IDs produce exactly one delivered message and turn, including concurrent retries | Duplicates group: sequential retry returns the original (200), different text with the same ID 409, and eight independent sockets released by one barrier yield exactly one 202 and seven 200 with one message ID. After settling: one customer message and exactly one simulated reply per submission; a later retry adds nothing. |
 | Worker claims durable jobs with bounded leases and short transitions, no transaction during external work | Runtime group: during a held turn a second send in the same conversation returns 202 in under 1 s, `pg_stat_activity` shows zero `idle in transaction` backends, and readiness stays 200. Claims, completion and recovery each lock the conversation row in short transactions. The lease never exceeds the 60 s deadline. Completion is accepted only with a current lease and execution generation. A partial unique index allows one running job per conversation, and claims follow message order. |
-| Seeded immutable starting configuration and simulation mode are visible; no false real-inference claim | Every conversation reports `configuration_version: 1` and `mode: "simulation"`. Replies are `simulated: true` and begin "Simulated reply: no AI model generated this text". Readiness reports `generation: "simulation"`. The widget shows the simulation notice and version. SQL `UPDATE`/`DELETE` of the published configuration fail (trigger). The worker receives no provider keys. A pinned configuration in any other mode fails the turn visibly as unavailable. |
+| Seeded immutable starting configuration and simulation mode are visible; no false real-inference claim | Every conversation reports `configuration_version: 1` and `mode: "simulation"`. Replies are `simulated: true` and begin "Simulated reply: no AI model generated this text". Readiness reports `generation: "simulation"`. The widget shows the simulation notice and version. SQL `UPDATE`/`DELETE` of the published configuration fail (trigger). Runtime group: after a non-simulation version 2 is inserted, a new conversation pins version 2 while the existing one stays on version 1. Its turn fails with only a system "connected generation is unavailable" notice and no assistant reply. The worker environment contains no `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY` or `TYPESAFE_API_KEY`. |
 | Restart preserves messages/state; interrupted turns fail visibly without blind replay | Runtime group: `docker compose kill worker` mid-turn, then start. The turn becomes `failed` with only a system notice ("interrupted … not retried automatically"), and the queued next turn then completes. A worker still busy after its lease expires has its late result discarded and the turn fails visibly. Resubmitting the failed ID returns the failed original and enqueues nothing. After a 27 s wait, nothing new appears. The full conversation payload and session listing are identical after restarting db/app/worker. App/worker logs contain neither the session token nor the message text. |
 
 ## Recorded result
@@ -45,7 +46,7 @@ Focused chat groups: **3 passed, 0 failed**. Chromium chat journey: **1 passed, 
 
 The first full-suite run passed 13/14. The Docker runtime group's unasserted sign-in hit Better Auth's per-IP 30/minute sign-in limit, which the added chat fixtures now exceed. Test sign-ins/sign-ups now retry once after the public `Retry-After`, and that sign-in is now asserted.
 
-Final isolated full suite after review fixes: **14 groups passed, 0 failed/cancelled/skipped; 585.483 seconds** (it includes rate-limit waits). Typecheck passed.
+Final isolated full suite after review fixes (commit 30f134f): **14 groups passed, 0 failed/cancelled/skipped; 585.483 seconds** (it includes rate-limit waits). Typecheck passed.
 
 ```text
 # tests 14
@@ -55,6 +56,14 @@ Final isolated full suite after review fixes: **14 groups passed, 0 failed/cance
 # skipped 0
 # duration_ms 585482.942208
 ```
+
+A follow-up adds the connected-mode and provider-key assertions above and makes the widget's non-simulation notice neutral. It was verified in focused runs: chat groups **3 passed, 0 failed**, and the Chromium chat journey **1 passed, 0 failed**. The full suite was not rerun for this test/widget-text-only change.
+
+These review fixes passed the suite but have no dedicated assertion:
+- turn claims in message order under concurrent sends,
+- readiness tied to the job loop,
+- the widget's restart after a 401/404 on send,
+- the widget's polling resume after a transient error.
 
 ## Review
 

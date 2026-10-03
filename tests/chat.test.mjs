@@ -170,6 +170,21 @@ test('Website chat: worker leases, crash and late results without replay, restar
   // The seeded starting configuration cannot be changed, even outside the API.
   for(const sql of [`UPDATE published_configurations SET document='{}' WHERE business_id='${business.id}'`,`DELETE FROM published_configurations WHERE business_id='${business.id}'`])
     assert.throws(()=>compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','-U','custom_bot','-d','custom_bot','-tAc',sql),e=>e.stderr.includes('Published configurations are immutable'));
+  // A pinned non-simulation configuration fails visibly; no provider keys reach the worker, so nothing claims real inference.
+  compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','-U','custom_bot','-d','custom_bot','-tAc',
+    `INSERT INTO published_configurations(business_id,version,document) VALUES('${business.id}',2,jsonb_set(starting_configuration(),'{generation,mode}','"connected"'))`);
+  const connected=await session.request(`${business.id}/conversations`,{});
+  assert.equal(connected.status,201);
+  assert.deepEqual([connected.data.conversation.configuration_version,connected.data.conversation.mode],[2,'connected']);
+  assert.equal((await session.request(session.path)).data.configuration_version,1);
+  const connectedSession={...session,path:`${business.id}/conversations/${connected.data.conversation.id}`};
+  assert.equal((await connectedSession.request(connectedSession.path+'/messages',{client_submission_id:'connected-turn-1',text:'Is this real?'})).status,202);
+  const unavailable=await settled(connectedSession);
+  assert.equal(unavailable.messages[0].turn_state,'failed');
+  assert.deepEqual(unavailable.messages.slice(1).map(m=>[m.author,m.simulated]),[['system',false]]);
+  assert.match(unavailable.messages[1].text,/connected generation is unavailable/);
+  const workerEnv=compose('exec','-T','worker','env');
+  for(const name of ['DEEPSEEK_API_KEY','DASHSCOPE_API_KEY','TYPESAFE_API_KEY'])assert.equal(workerEnv.includes(name),false);
   // Test job controls are refused outside test mode.
   assert.throws(()=>execFileSync('docker',['compose','-f','compose.yaml','-f','compose.test.yaml','run','--rm','--no-deps','-e','APP_MODE=local','worker'],{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000}),e=>e.stderr.includes('test-only'));
   const logs=compose('logs','app','worker');
