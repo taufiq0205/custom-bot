@@ -165,12 +165,14 @@ class Rejected(Exception):
     """A non-retryable call failure: authentication, validation, redirects or malformed results."""
 
 
-def current(connection, job):
+def current(connection, job, controls=False):
     """Inside a transaction: lock the session, then the conversation, then require this worker's live lease at the job's generation.
     An ended session fails the turn visibly. Later slices add source, consent and deletion checks here.
-    The Business share lock (taken before the conversation, as the inbox does) makes Owner action-control changes wait for this check."""
+    With controls, a Business share lock (taken before the conversation, as the inbox does) makes Owner action-control changes
+    wait for the action checks that follow."""
     identity = identity_current(connection, job[3])
-    connection.execute('SELECT 1 FROM businesses WHERE id=%s FOR SHARE', (job[1],))
+    if controls:
+        connection.execute('SELECT 1 FROM businesses WHERE id=%s FOR SHARE', (job[1],))
     connection.execute('SELECT 1 FROM conversations WHERE id=%s FOR UPDATE', (job[2],))
     held = connection.execute(
         "SELECT 1 FROM jobs j JOIN conversations c ON c.id=j.conversation_id WHERE j.id=%s AND j.status='running' "
@@ -190,9 +192,10 @@ def origin(url):
     return f"https://{url.hostname}{'' if url.port in (None, 443) else f':{url.port}'}"
 
 
-def authorize(connection, job, action):
+def authorize(connection, job, action, secret=False):
     """Inside the turn's revalidation transaction: the live controls this action needs right now, whichever path requested it
-    (explicit HTTP step or agent). Returns a grant, or a value-free denial reason. Live controls override the pinned version."""
+    (explicit HTTP step or agent). Returns a grant, or a value-free denial reason. Live controls override the pinned version.
+    Only an attempt asks for the secret; rechecks compare revisions, which every rotation or revocation changes."""
     business, url = job[1], urlsplit(action['url'])
     if connection.execute('SELECT 1 FROM action_revocations WHERE business_id=%s AND action_id=%s', (business, action['id'])).fetchone():
         return 'action revoked'
@@ -214,15 +217,21 @@ def authorize(connection, job, action):
                                  'WHERE c.id=%s', (job[2],)).fetchone()
     if not subject:
         return UNVERIFIED
+    grant = {'parameter': policy[0], 'subject': subject[0], 'owner_field': policy[1], 'revisions': (credential[3], policy[2])}
+    if not secret:
+        return grant
     if not CIPHER:
         return 'credential key not configured'
     sealed = bytes(credential[2])
     try:
-        secret = CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{action["credential"]}'.encode()).decode()
+        return {**grant, 'headers': {credential[1]: CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{action["credential"]}'.encode()).decode()}}
     except InvalidTag:
         return 'credential unreadable'
-    return {'headers': {credential[1]: secret}, 'parameter': policy[0], 'subject': subject[0], 'owner_field': policy[1],
-            'revisions': (credential[3], policy[2])}
+
+
+def stale(connection, job, grants):
+    """Whether any accepted result's action controls were revoked or changed since; its facts may then go nowhere else."""
+    return any(authorize(connection, job, action) != grant for action, grant in grants)
 
 
 class Turn:
@@ -231,7 +240,7 @@ class Turn:
         self.deadline = job[5]
         # Fields from verified HTTP results; agents cannot overwrite them.
         self.context, self.observed, self.steps, self.calls = {}, set(), 0, {'provider': 0, 'http': 0}
-        # Grants behind accepted results, rechecked before anything is delivered.
+        # Grants (without secrets) behind accepted results, rechecked before their facts go to a provider or the Customer.
         self.grants = {}
 
     def left(self):
@@ -242,13 +251,15 @@ class Turn:
         return remaining
 
     def begin(self, step, kind, target, bound, action=None):
-        """Revalidate the turn (and an action's live controls), extend the lease to cover only this attempt, and record the attempt
-        before it starts. Holds no transaction afterwards."""
+        """Revalidate the turn, its accepted results' controls (their facts are in the context this attempt may send) and an
+        action's live controls; extend the lease to cover only this attempt, and record the attempt before it starts.
+        Holds no transaction afterwards."""
         global alive_until
         with self.connection.transaction():
-            held = current(self.connection, self.job)
-            if held:
-                grant = authorize(self.connection, self.job, action) if action else None
+            held = current(self.connection, self.job, bool(action or self.grants))
+            changed = held and stale(self.connection, self.job, self.grants.values())
+            if held and not changed:
+                grant = authorize(self.connection, self.job, action, secret=True) if action else None
                 denied = grant if isinstance(grant, str) else None
                 if not denied:
                     self.connection.execute("UPDATE jobs SET lease_expires_at=least(greatest(lease_expires_at,clock_timestamp()+make_interval(secs => %s)),deadline) "
@@ -260,6 +271,8 @@ class Turn:
         # Raised after commit, so a visible session-ended failure recorded by current() is kept.
         if not held:
             raise Lost()
+        if changed:
+            raise Stop(FAILED, 'action controls changed')
         if denied == UNVERIFIED:
             raise Clarify(SIGN_IN)
         if denied:
@@ -292,13 +305,14 @@ class Turn:
         and the turn and the action's live controls are unchanged; only then is it recorded and used."""
         bound = min(action['timeout_ms'] / 1000, HTTP_TIMEOUT, self.left())
         attempt, grant = self.begin(step, 'http', action['id'], bound, action)
-        url = urlsplit(action['url'])
-        values = {**{k: json.dumps(v) if isinstance(v, bool) else v for k, v in inputs.items()}, grant['parameter']: grant['subject']}
-        target = url._replace(query='&'.join(filter(None, [url.query, urlencode(values)])), fragment='').geturl()
+        headers = grant.pop('headers')
         status, error = 'failed', 'aborted'
         try:
+            url = urlsplit(action['url'])
+            values = {**{k: json.dumps(v) if isinstance(v, bool) else v for k, v in inputs.items()}, grant['parameter']: grant['subject']}
+            target = url._replace(query='&'.join(filter(None, [url.query, urlencode(values)])), fragment='').geturl()
             try:
-                data = strict(fetch('GET', target, None, min(bound, self.left()), grant['headers']))
+                data = strict(fetch('GET', target, None, min(bound, self.left()), headers))
             except ValueError:
                 raise Rejected('malformed result')
             # Ownership is checked independently of any order number: a foreign or unowned result discloses nothing.
@@ -306,7 +320,7 @@ class Turn:
                 raise Rejected('result not authorized for this Customer')
             result = conform(action['result_schema'], data)
             with self.connection.transaction():
-                held = current(self.connection, self.job)
+                held = current(self.connection, self.job, True)
                 accepted = held and authorize(self.connection, self.job, action) == grant
                 if accepted:
                     self.connection.execute("INSERT INTO lookup_results(business_id,conversation_id,job_id,step_id,action_id,result) "
@@ -341,6 +355,9 @@ class Turn:
 
     def act(self, step, action, values):
         """The one action path for explicit HTTP steps and agent requests. Missing inputs clarify; any failure returns None."""
+        if not self.connection.execute('SELECT customer_id FROM conversations WHERE id=%s', (self.job[2],)).fetchone()[0]:
+            # Never ask an anonymous Customer for inputs it could not use; begin() still decides authoritatively.
+            raise Clarify(SIGN_IN)
         schema = action['input_schema']
         missing = [name for name in schema.get('required', []) if name not in values]
         if missing:
@@ -515,24 +532,33 @@ def fetch(method, url, body, seconds, headers=None):
 
 def vetted(host, port):
     """Resolve on every attempt and allow only public addresses: an approved hostname cannot reach private, loopback,
-    link-local or other non-global networks. The connection then uses this address, so a second lookup cannot change it."""
+    link-local or other non-global networks. The connection then uses only these addresses, so a second lookup cannot change them."""
     addresses = [info[4][0] for info in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
     for address in addresses:
         ip = ipaddress.ip_address(address.split('%')[0])
         ip = getattr(ip, 'ipv4_mapped', None) or ip
         if (not ip.is_global or ip.is_multicast) and host not in PUBLIC_HOSTS:
             raise Rejected('destination address not permitted')
-    return addresses[0]
+    return addresses
 
 
 class Pinned(http.client.HTTPSConnection):
     """HTTPS to an already vetted address, verifying the certificate for the hostname."""
-    def __init__(self, host, port, address, **options):
+    def __init__(self, host, port, addresses, **options):
         super().__init__(host, port, **options)
-        self.address = address
+        self.addresses = addresses
 
     def connect(self):
-        self.sock = self._context.wrap_socket(socket.create_connection((self.address, self.port), self.timeout), server_hostname=self.host)
+        # Each vetted address in resolver order, like create_connection does for a hostname.
+        for address in self.addresses:
+            try:
+                sock = socket.create_connection((address, self.port), self.timeout)
+                break
+            except OSError as failure:
+                error = failure
+        else:
+            raise error
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
 
 def request(method, url, body, deadline, headers=None):
@@ -567,9 +593,9 @@ def request(method, url, body, deadline, headers=None):
 def finish(connection, job, outcome, text=None, grants=()):
     """Accept the turn's result only while it still holds authority; a failure or handoff step hands off in the same transaction."""
     with connection.transaction():
-        if not current(connection, job):
+        if not current(connection, job, bool(grants)):
             return
-        if outcome == 'reply' and any(authorize(connection, job, action) != grant for action, grant in grants):
+        if outcome == 'reply' and stale(connection, job, grants):
             # A reply may carry looked-up facts: a revoked or changed action defeats it, too.
             outcome, text = 'stop', Stop(FAILED, 'action controls changed before delivery')
         if outcome == 'stop':
@@ -610,7 +636,7 @@ def run(connection, job):
         outcome, text = 'reply', str(clarification)
     except Stop as stop:
         outcome, text = 'stop', stop
-    finish(connection, job, outcome, text, turn.grants.values())
+    finish(connection, job, outcome, text, list(turn.grants.values()))
 
 
 threading.Thread(target=heartbeat, daemon=True).start()

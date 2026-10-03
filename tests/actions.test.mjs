@@ -234,6 +234,27 @@ test('Actions: revocation defeats pinned versions, in-flight results and undeliv
   // The completed authorized lookup remains, labelled with when it was observed.
   const {lookups,handoff_reason}=(await inbox(b,customer)).data;
   assert.deepEqual([handoff_reason,lookups.map(l=>l.result)],['automation-failure',[{status:'shipped'}]]);
+
+  // Revoked while a later agent runs: no further provider call receives the looked-up facts.
+  b=await business('actions-provider',{owner:o});
+  key=`provider-${crypto.randomUUID()}`;
+  await publish(b,config({agents:[agent(`${key}.triage`),agent(`${key}.mid`),agent(`${key}.answer`)],actions:[action('lookup',key)],
+    steps:[{id:'triage',type:'agent',agent:'triage',final:false},{id:'order',type:'http',action:'lookup'},{id:'mid',type:'agent',agent:'mid',final:false},
+      {id:'answer',type:'agent',agent:'answer',final:true},handoff],
+    links:[['triage','next','order'],['triage','unsupported','support'],['order','success','mid'],['order','failure','support'],
+      ['mid','next','answer'],['mid','unsupported','support'],['answer','unsupported','support']]}));
+  await script(`${key}.triage`,[next]);
+  await script(`${key}.mid`,[{...reply({outcome:'next',context:{tone:'brief'}}),delay:4}]);
+  await script(`${key}.answer`,[answer]);
+  await script(key,[owned({status:'PROVIDER-FACT'})]);
+  customer=await start(b);
+  const later=await customer.send('Where is A-1?');
+  for(let i=0;i<40&&!(await calls(`${key}.mid`)).length;i++)await wait(250);
+  assert.equal((await b.owner.request(b.controls('actions/lookup'),{revoked:true})).status,200);
+  const ended=await customer.settle(later);
+  assert.equal((await calls(`${key}.answer`)).length,0);
+  assert.equal(ended.messages.some(m=>m.author==='assistant'),false);
+  assert.equal((await inbox(b,customer)).data.handoff_reason,'automation-failure');
 });
 
 test('Actions: credentials are encrypted with a key outside the database and never appear in API, prompt, trace, log or database payloads',async()=>{

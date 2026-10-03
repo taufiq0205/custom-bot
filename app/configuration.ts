@@ -4,7 +4,8 @@ import { pool } from './config.js';
 import { body, Failure, keys, uuid } from './memberships.js';
 type Issue={path:string,message:string,line?:number,column?:number};
 type Check=(value:any,path:string)=>void;
-const ID=/^[A-Za-z][A-Za-z0-9_-]{0,63}$/, REF=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/, FIELD=/^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const ID=/^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+export const REF=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/, FIELD=/^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const MAX_TEXT=262144;
 // PostgreSQL text/jsonb cannot store these.
 const unstorable=/\u0000|\p{Cs}/u;

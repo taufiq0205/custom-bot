@@ -2,10 +2,9 @@ import type { IncomingMessage } from 'node:http';
 import type { PoolClient } from 'pg';
 import { createCipheriv, randomBytes } from 'node:crypto';
 import { credentialKey, pool } from './config.js';
-import { publicHttps } from './configuration.js';
+import { FIELD, publicHttps, REF } from './configuration.js';
 import { body, Failure, keys, uuid } from './memberships.js';
-const REF='[A-Za-z0-9][A-Za-z0-9._:-]{0,99}', FIELD=/^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
-const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63}))$`);
+const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63}))$`);
 // Visible ASCII; no CR/LF can reach a request header.
 const SECRET=/^[\x21-\x7e](?:[\x20-\x7e]{0,4094}[\x21-\x7e])?$/;
 
@@ -32,11 +31,9 @@ export async function actions(req:IncomingMessage,path:string,user:{id:string},j
     if(!(await client.query("SELECT 1 FROM memberships WHERE business_id=$1 AND operator_id=$2 AND active AND role='Owner'",[business,user.id])).rowCount)throw new Failure(404,'Business not found');
     let result;
     if(listing) {
-      const [credentials,policies,revoked]=await Promise.all([
-        client.query('SELECT ref,origin,header,active,revision,updated_at FROM action_credentials WHERE business_id=$1 ORDER BY ref',[business]),
-        client.query('SELECT ref,customer_parameter,owner_field,active,revision,updated_at FROM authorization_policies WHERE business_id=$1 ORDER BY ref',[business]),
-        client.query('SELECT action_id,revoked_at FROM action_revocations WHERE business_id=$1 ORDER BY action_id',[business])]);
-      result={credentials:credentials.rows,policies:policies.rows,revoked_actions:revoked.rows};
+      result={credentials:(await client.query('SELECT ref,origin,header,active,revision,updated_at FROM action_credentials WHERE business_id=$1 ORDER BY ref',[business])).rows,
+        policies:(await client.query('SELECT ref,customer_parameter,owner_field,active,revision,updated_at FROM authorization_policies WHERE business_id=$1 ORDER BY ref',[business])).rows,
+        revoked_actions:(await client.query('SELECT action_id,revoked_at FROM action_revocations WHERE business_id=$1 ORDER BY action_id',[business])).rows};
     } else if(action) {
       keys(input,['revoked']);
       if(typeof input.revoked!=='boolean')throw new Failure(400,'Provide revoked (true or false)');
@@ -54,7 +51,7 @@ export async function actions(req:IncomingMessage,path:string,user:{id:string},j
     } else if(resource==='credentials') {
       keys(input,['ref','origin','header','secret']);
       const url=publicHttps(input.origin);
-      if(typeof input.ref!=='string'||!new RegExp(`^${REF}$`).test(input.ref)||!url||url.origin!==input.origin
+      if(typeof input.ref!=='string'||!REF.test(input.ref)||!url||url.origin!==input.origin
         ||typeof input.header!=='string'||!/^(authorization|x-[a-z0-9-]{1,60})$/.test(input.header)||typeof input.secret!=='string'||!SECRET.test(input.secret))
         throw new Failure(400,'Provide ref, origin (https://api.example.com), header ("authorization" or "x-…", lower case) and secret (1–4096 visible ASCII characters)');
       if(!credentialKey)throw new Failure(503,'Credential storage is not configured: set ACTION_CREDENTIAL_KEY (openssl rand -hex 32) for the app and worker');
@@ -65,7 +62,7 @@ export async function actions(req:IncomingMessage,path:string,user:{id:string},j
         RETURNING ref,origin,header,active,revision,updated_at`,[business,input.ref,input.origin,input.header,seal(business,input.ref,input.secret),user.id])).rows[0];
     } else {
       keys(input,['ref','customer_parameter','owner_field']);
-      if(typeof input.ref!=='string'||!new RegExp(`^${REF}$`).test(input.ref)||!FIELD.test(String(input.customer_parameter))||!FIELD.test(String(input.owner_field))
+      if(typeof input.ref!=='string'||!REF.test(input.ref)||!FIELD.test(String(input.customer_parameter))||!FIELD.test(String(input.owner_field))
         ||typeof input.customer_parameter!=='string'||typeof input.owner_field!=='string')
         throw new Failure(400,`Provide ref, customer_parameter and owner_field (names matching ${FIELD})`);
       result=(await client.query(`INSERT INTO authorization_policies(business_id,ref,customer_parameter,owner_field,updated_by) VALUES($1,$2,$3,$4,$5)
