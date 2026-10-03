@@ -24,13 +24,14 @@ test('tokens: independent concurrent consumers and expiry',async()=>{
  await expired.request('/api/auth/email-otp/request-password-reset',{email:expired.email});
  const expiredReset=await otp(expired.email,'forget-password');
  await new Promise(r=>setTimeout(r,9000));
- assert.equal((await expired.request('/api/auth/email-otp/verify-email',{email:expired.email,otp:expiredCode})).status,400);
- assert.equal((await expired.request('/api/auth/email-otp/reset-password',{email:expired.email,otp:expiredReset,password:'Expired-password-928!'})).status,400);
- assert.equal((await expired.request('/api/auth/sign-in/email',{email:expired.email,password:expired.password})).status,403);
+ assert.equal((await limited(()=>expired.request('/api/auth/email-otp/verify-email',{email:expired.email,otp:expiredCode}))).status,400);
+ assert.equal((await limited(()=>expired.request('/api/auth/email-otp/reset-password',{email:expired.email,otp:expiredReset,password:'Expired-password-928!'}))).status,400);
+ assert.equal((await limited(()=>expired.request('/api/auth/sign-in/email',{email:expired.email,password:expired.password}))).status,403);
 });
 test('Docker: restart persistence, private services, guarded migrations, seed idempotency and readiness failure',async()=>{
  const {request,email,password}=await account('durable');
- await request('/api/auth/email-otp/verify-email',{email,otp:await otp(email,'email-verification')});
+ const code=await otp(email,'email-verification');
+ assert.equal((await limited(()=>request('/api/auth/email-otp/verify-email',{email,otp:code}))).status,200);
  assert.equal((await limited(()=>request('/api/auth/sign-in/email',{email,password}))).status,200);
  const created=await request('/api/businesses',{name:'Preserved Business'});
  assert.equal(created.status,201);

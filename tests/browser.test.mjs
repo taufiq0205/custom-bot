@@ -127,3 +127,108 @@ test('browser: Owner approves a website; anonymous Customers chat with labelled 
   assert.deepEqual(errors,[]);
  } finally {await browser.close();site.close();}
 });
+test('browser: a shared browser links only the current anonymous chat; sign-out and account switching hide earlier history',async()=>{
+ const {operator}=await import('./helpers.mjs');
+ const {createServer}=await import('node:http');
+ const {SignJWT,exportJWK,generateKeyPair}=await import('jose');
+ const owner=await operator('browser-identity-owner');
+ const business=(await owner.request('/api/businesses',{name:'Browser Identity'})).data;
+ const {publicKey,privateKey}=await generateKeyPair('ES256',{extractable:true});
+ // A controlled Business website: its backend signs a fresh assertion per page for whoever is signed in there.
+ const site=createServer(async(req,res)=>{
+  const [sub,ttl]={'/as/a':['customer-a',300],'/as/a-short':['customer-a',5],'/as/b':['customer-b',300]}[req.url]??[];
+  const iat=Math.floor(Date.now()/1000);
+  const assertion=sub?await new SignJWT({iss:approved,aud:new URL(base).origin,business_id:business.id,sub,iat,exp:iat+ttl,jti:crypto.randomUUID()}).setProtectedHeader({alg:'ES256',kid:'browser-key'}).sign(privateKey):'';
+  res.writeHead(200,{'content-type':'text/html'});
+  res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop</title><h1>Shop ${sub??'signed out'}</h1><script src="${base}/widget.js" data-business="${business.id}"${assertion?` data-assertion="${assertion}"`:''} defer></script>`);
+ });
+ await new Promise(r=>site.listen(0,'127.0.0.1',r));
+ const approved=`http://127.0.0.1:${site.address().port}`;
+ assert.equal((await owner.request(`/api/businesses/${business.id}/website-origins`,{origin:approved,approved:true})).status,200);
+ assert.equal((await owner.request(`/api/businesses/${business.id}/customer-keys`,{kid:'browser-key',issuer:approved,public_key:await exportJWK(publicKey)})).status,201);
+ const browser=await chromium.launch();
+ const errors=[];
+ try {
+  const page=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();
+  page.on('pageerror',e=>errors.push(e.message));
+  const log=()=>page.getByRole('log');
+  const signedIn=page.getByText(/Signed in: your earlier conversations/);
+  await page.goto(approved);
+  await page.getByText(/Configuration version 1\./).waitFor();
+  await page.getByLabel('Message').fill('Anonymous question from A');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await log().getByText(/^Simulated assistant:/).waitFor();
+  // Signing in on the website links the current anonymous conversation.
+  await page.goto(approved+'/as/a');
+  await signedIn.waitFor();
+  await log().getByText('You: Anonymous question from A',{exact:true}).waitFor();
+  // Signing out starts fresh anonymous context, also after reload.
+  await page.goto(approved);
+  await page.getByText(/Configuration version 1\./).waitFor();
+  await page.waitForFunction(()=>!document.body.textContent.includes('Anonymous question from A'));
+  assert.equal(await signedIn.count(),0);
+  assert.equal(await log().getByRole('listitem').count(),0);
+  await page.reload();
+  await page.getByText(/Configuration version 1\./).waitFor();
+  assert.equal(await log().getByRole('listitem').count(),0);
+  assert.equal(await page.getByRole('button',{name:/Open earlier conversation/}).count(),0);
+  // Another Customer signs in on the same browser and sees none of A's history.
+  await page.goto(approved+'/as/b');
+  await signedIn.waitFor();
+  await page.getByLabel('Message').fill('Question from B');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await log().getByText(/^Simulated assistant:/).waitFor();
+  assert.equal(await page.getByText('Anonymous question from A').count(),0);
+  assert.equal(await page.getByRole('button',{name:/Open earlier conversation/}).count(),0);
+  // Switching back to A ends B's access and offers only A's earlier conversation.
+  await page.goto(approved+'/as/a');
+  await signedIn.waitFor();
+  await page.waitForFunction(()=>!document.body.textContent.includes('Question from B'));
+  const earlier=page.getByRole('button',{name:/Open earlier conversation/});
+  await earlier.first().waitFor();
+  assert.equal(await earlier.count(),1);
+  await earlier.click();
+  await log().getByText('You: Anonymous question from A',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Question from B').count(),0);
+  // A second tab rotates the shared session for the same Customer and keeps the open conversation;
+  // the first tab adopts the rotated token, so its next send succeeds directly.
+  const tab=await page.context().newPage();
+  tab.on('pageerror',e=>errors.push(e.message));
+  await tab.goto(approved+'/as/a');
+  await tab.getByRole('log').getByText('You: Anonymous question from A',{exact:true}).waitFor();
+  await page.getByLabel('Message').fill('Follow-up from the first tab');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await log().getByText('You: Follow-up from the first tab',{exact:true}).waitFor();
+  assert.equal(await page.getByText(/Your chat session changed/).count(),0);
+  await signedIn.waitFor();
+  await log().getByText('You: Anonymous question from A',{exact:true}).waitFor();
+  // Signing out, then in as B, in the other tab clears this idle tab without any interaction here.
+  await tab.goto(approved);
+  await tab.getByText(/Configuration version 1\./).waitFor();
+  await page.waitForFunction(()=>!document.body.textContent.includes('Anonymous question from A'));
+  assert.equal(await signedIn.count(),0);
+  await tab.goto(approved+'/as/b');
+  await tab.getByText(/Signed in: your earlier conversations/).waitFor();
+  await signedIn.waitFor();
+  for(const text of ['Anonymous question from A','Follow-up from the first tab','Question from B'])assert.equal(await page.getByText(text).count(),0,text);
+  await tab.close();
+  // Expiry: an assertion valid for 5 s ends the verified chat server-side; the next send starts fresh anonymous context.
+  const loaded=Date.now();
+  await page.goto(approved+'/as/a-short');
+  await signedIn.waitFor();
+  await page.getByLabel('Message').fill('Before expiry');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await log().getByText(/^Simulated assistant:/).waitFor();
+  await new Promise(r=>setTimeout(r,Math.max(0,loaded+6500-Date.now())));
+  await page.getByLabel('Message').fill('After expiry');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await page.getByText(/Your chat session changed/).waitFor();
+  assert.equal(await log().getByRole('listitem').count(),0);
+  assert.equal(await signedIn.count(),0);
+  assert.equal(await page.getByRole('button',{name:/Open earlier conversation/}).count(),0);
+  assert.equal(await page.getByText('Before expiry').count(),0);
+  assert.equal(await page.getByLabel('Message').inputValue(),'After expiry');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.deepEqual(errors,[]);
+ } finally {await browser.close();site.close();}
+});

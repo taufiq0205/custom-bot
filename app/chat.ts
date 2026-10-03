@@ -1,19 +1,63 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { PoolClient } from 'pg';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { pool } from './config.js';
+import { errors, importJWK, jwtVerify } from 'jose';
+import { origin as platform, pool } from './config.js';
 import { body, Failure, keys, uuid, verifier } from './memberships.js';
-const route=new RegExp(`^/api/chat/(${uuid})/conversations(?:/(${uuid})(/messages)?)?$`);
+const route=new RegExp(`^/api/chat/(${uuid})/(?:(identity|logout)|conversations(?:/(${uuid})(/messages)?)?)$`);
 const conversationColumns='c.id,c.control_state,c.configuration_version,p.document->\'generation\'->>\'mode\' AS mode';
-async function conversation(client:PoolClient,business:string,session:string,id:string) {
+type Session={id:string,customer_id:string|null};
+const expired=()=>new Failure(401,'Chat session expired; start a new conversation');
+const rejected=()=>new Failure(401,'Identity assertion rejected');
+// Logout/switch end a session; a verified session also ends when its assertion expires.
+async function current(client:PoolClient,business:string,token:string,lock='') {
+  return (await client.query(`SELECT id,customer_id FROM chat_sessions WHERE business_id=$1 AND token_verifier=$2
+    AND ended_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) ${lock}`,[business,verifier(token)])).rows[0] as Session|undefined;
+}
+// A verified session reaches its Customer's conversations; an anonymous session only its own anonymous ones.
+const owned='c.business_id=$1 AND (c.customer_id=$2 OR ($2::uuid IS NULL AND c.customer_id IS NULL AND c.session_id=$3))';
+const scope=(business:string,session:Session)=>[business,session.customer_id,session.id];
+async function conversation(client:PoolClient,business:string,session:Session,id:string) {
   const found=await client.query(`SELECT ${conversationColumns} FROM conversations c JOIN published_configurations p ON p.business_id=c.business_id AND p.version=c.configuration_version
-    WHERE c.business_id=$1 AND c.session_id=$2 AND c.id=$3`,[business,session,id]);
+    WHERE ${owned} AND c.id=$4`,[...scope(business,session),id]);
   if(!found.rowCount)throw new Failure(404,'Conversation not found');
   const messages=await client.query(`SELECT id,author,text,simulated,client_submission_id,reply_to,turn_state,created_at FROM messages
     WHERE business_id=$1 AND conversation_id=$2 ORDER BY seq`,[business,id]);
   return {...found.rows[0],messages:messages.rows};
 }
-// Customer chat runs on Business websites: authority is the anonymous bearer token plus an approved Origin, never cookies.
+async function open(client:PoolClient,business:string,customer?:{id:string,kid:string,exp:number}) {
+  const token=randomBytes(32).toString('hex'),id=randomUUID();
+  await client.query('INSERT INTO chat_sessions(id,business_id,token_verifier,customer_id,signing_kid,expires_at) VALUES($1,$2,$3,$4,$5,to_timestamp($6))',
+    [id,business,verifier(token),customer?.id??null,customer?.kid??null,customer?.exp??null]);
+  return {token,session:{id,customer_id:customer?.id??null}};
+}
+// New conversations pin the Business's current published configuration.
+async function start(client:PoolClient,business:string,session:Session) {
+  const id=randomUUID();
+  await client.query(`INSERT INTO conversations(id,business_id,session_id,customer_id,configuration_version)
+    SELECT $1,$2,$3,$4,max(version) FROM published_configurations WHERE business_id=$2`,[id,business,session.id,session.customer_id]);
+  return id;
+}
+// The website's backend signs a JWT (ES256 only) with a key the Owner registered; see docs/customer-identity.md.
+async function verify(business:string,assertion:string) {
+  let key:{issuer:string,public_jwk:object}|undefined;
+  try {
+    const {payload,protectedHeader}=await jwtVerify(assertion,async header=>{
+      key=typeof header.kid==='string'?(await pool.query('SELECT issuer,public_jwk FROM customer_signing_keys WHERE business_id=$1 AND kid=$2',[business,header.kid])).rows[0]:undefined;
+      if(!key)throw rejected();
+      return importJWK(key.public_jwk,'ES256');
+    },{algorithms:['ES256'],audience:platform,requiredClaims:['iss','aud','sub','iat','exp','jti'],maxTokenAge:3600,clockTolerance:5});
+    // jose has checked the signature, alg, aud, exp/nbf and that iat is past and under an hour old.
+    const {sub,jti,iat,exp}=payload as {sub:unknown,jti:unknown,iat:number,exp:number};
+    if(payload.iss!==key!.issuer||payload.business_id!==business||typeof sub!=='string'||!sub||sub.length>200
+      ||typeof jti!=='string'||!jti||jti.length>200||exp-iat>3600)throw rejected();
+    return {sub,jti,exp,kid:protectedHeader.kid as string,jwk:key!.public_jwk};
+  } catch(error) {
+    if(error instanceof errors.JOSEError||error instanceof Failure)throw rejected();
+    throw error;
+  }
+}
+// Customer chat runs on Business websites: authority is the session bearer token plus an approved Origin, never cookies.
 export async function chat(req:IncomingMessage,res:ServerResponse,path:string,json:(status:number,value:unknown)=>void) {
   if(!path.startsWith('/api/chat/'))return false;
   const reply=(status:number,value:unknown)=>{json(status,value);return true;};
@@ -27,32 +71,79 @@ export async function chat(req:IncomingMessage,res:ServerResponse,path:string,js
     res.writeHead(204,{'Access-Control-Allow-Methods':'GET, POST','Access-Control-Allow-Headers':'authorization, content-type','Access-Control-Max-Age':'600'});
     res.end();return true;
   }
-  const [,business,id,messages]=match;
+  const [,business,action,id,messages]=match;
   let client:PoolClient|undefined;
   try {
     const input=req.method==='POST'?await body(req,16384):null;
     const token=req.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-    if(req.headers.authorization!==undefined&&!token)throw new Failure(401,'Chat session expired; start a new conversation');
-    const session=token?(await pool.query('SELECT id FROM chat_sessions WHERE business_id=$1 AND token_verifier=$2',[business,verifier(token)])).rows[0]?.id:undefined;
-    if(token&&!session)throw new Failure(401,'Chat session expired; start a new conversation');
+    if(req.headers.authorization!==undefined&&!token)throw expired();
+    // Verify before taking a pooled client: verification itself queries the pool.
+    let identity;
+    if(action==='identity'&&req.method==='POST') {
+      keys(input,['assertion']);
+      if(typeof input.assertion!=='string'||input.assertion.length>8192)throw new Failure(400,'Provide assertion');
+      identity=await verify(business,input.assertion);
+    }
     client=await pool.connect();
+    if(identity) {
+      await client.query('BEGIN');
+      // The verifying key must still be registered at commit; key removal waits on this lock, then ends the new session too.
+      if(!(await client.query('SELECT 1 FROM customer_signing_keys WHERE business_id=$1 AND kid=$2 AND public_jwk=$3 FOR SHARE',[business,identity.kid,identity.jwk])).rowCount)throw rejected();
+      if(!(await client.query('INSERT INTO customer_assertions(business_id,jti,expires_at) VALUES($1,$2,to_timestamp($3)) ON CONFLICT DO NOTHING',[business,identity.jti,identity.exp])).rowCount)
+        throw rejected();
+      // The row lock serializes identity changes on one session; a racing request re-reads the rotated/ended row and fails.
+      const presented=token?await current(client,business,token,'FOR UPDATE'):undefined;
+      if(token&&!presented)throw expired();
+      const customer=(await client.query(`INSERT INTO customers(id,business_id,external_id) VALUES($1,$2,$3)
+        ON CONFLICT(business_id,external_id) DO UPDATE SET external_id=EXCLUDED.external_id RETURNING id`,[randomUUID(),business,identity.sub])).rows[0].id;
+      const verified={id:customer,kid:identity.kid,exp:identity.exp};
+      let issued,session:Session,conversationId:string|undefined;
+      if(presented&&(presented.customer_id===null||presented.customer_id===customer)) {
+        // Sign-in or refresh keeps the session, so its in-flight turns continue; only its latest conversation links.
+        if(presented.customer_id===null)await client.query(`UPDATE conversations SET customer_id=$3 WHERE id=(SELECT id FROM conversations
+          WHERE business_id=$1 AND session_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1) AND customer_id IS NULL`,[business,presented.id,customer]);
+        issued=randomBytes(32).toString('hex');
+        await client.query('UPDATE chat_sessions SET token_verifier=$2,customer_id=$3,signing_kid=$4,expires_at=to_timestamp($5) WHERE id=$1',
+          [presented.id,verifier(issued),customer,identity.kid,identity.exp]);
+        session={id:presented.id,customer_id:customer};
+        conversationId=(await client.query(`SELECT id FROM conversations WHERE business_id=$1 AND session_id=$2 AND customer_id=$3
+          ORDER BY created_at DESC,id DESC LIMIT 1`,[business,presented.id,customer])).rows[0]?.id;
+      } else {
+        // A different Customer on this browser: the previous identity ends and nothing of it carries over.
+        if(presented)await client.query('UPDATE chat_sessions SET ended_at=clock_timestamp() WHERE id=$1',[presented.id]);
+        ({token:issued,session}=await open(client,business,verified));
+      }
+      conversationId??=await start(client,business,session);
+      await client.query('COMMIT');
+      return reply(200,{token:issued,verified:true,expires_at:new Date(identity.exp*1000).toISOString(),conversation:await conversation(client,business,session,conversationId)});
+    }
+    if(action==='logout'&&req.method==='POST') {
+      keys(input,[]);
+      if(!token)throw new Failure(401,'Chat session required');
+      await client.query('BEGIN');
+      const presented=await current(client,business,token,'FOR UPDATE');
+      if(!presented)throw expired();
+      await client.query('UPDATE chat_sessions SET ended_at=clock_timestamp() WHERE id=$1',[presented.id]);
+      const {token:issued,session}=await open(client,business);
+      const conversationId=await start(client,business,session);
+      await client.query('COMMIT');
+      return reply(200,{token:issued,verified:false,conversation:await conversation(client,business,session,conversationId)});
+    }
+    if(action)throw new Failure(404,'Not found');
+    const session=token?await current(client,business,token):undefined;
+    if(token&&!session)throw expired();
     if(!id&&req.method==='POST') {
       keys(input,[]);
-      const issued=session?undefined:randomBytes(32).toString('hex');
-      const conversationId=randomUUID();
       await client.query('BEGIN');
-      const sessionId=session??randomUUID();
-      if(issued)await client.query('INSERT INTO chat_sessions(id,business_id,token_verifier) VALUES($1,$2,$3)',[sessionId,business,verifier(issued)]);
-      // New conversations pin the Business's current published configuration.
-      await client.query(`INSERT INTO conversations(id,business_id,session_id,configuration_version)
-        SELECT $1,$2,$3,max(version) FROM published_configurations WHERE business_id=$2`,[conversationId,business,sessionId]);
+      const created=session?{token:undefined,session}:await open(client,business);
+      const conversationId=await start(client,business,created.session);
       await client.query('COMMIT');
-      return reply(201,{...(issued?{token:issued}:{}),conversation:await conversation(client,business,sessionId,conversationId)});
+      return reply(201,{...(created.token?{token:created.token}:{}),conversation:await conversation(client,business,created.session,conversationId)});
     }
     if(!session)throw new Failure(401,'Chat session required');
     if(!id&&req.method==='GET') {
       const list=await client.query(`SELECT c.id,c.control_state,c.configuration_version,c.created_at FROM conversations c
-        WHERE c.business_id=$1 AND c.session_id=$2 ORDER BY c.created_at,c.id`,[business,session]);
+        WHERE ${owned} ORDER BY c.created_at,c.id`,scope(business,session));
       return reply(200,list.rows);
     }
     if(id&&!messages&&req.method==='GET')return reply(200,await conversation(client,business,session,id));
@@ -62,12 +153,14 @@ export async function chat(req:IncomingMessage,res:ServerResponse,path:string,js
     if(typeof submission!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(submission)||!text||text.length>2000)
       throw new Failure(400,'Provide client_submission_id (8–100 letters, digits, - or _) and text (1–2000 characters)');
     await client.query('BEGIN');
+    // Recheck the session under a share lock so logout/switch and this submission serialize.
+    if(!await current(client,business,token!,'FOR SHARE'))throw expired();
     // Lock the conversation first: every turn transition takes this lock before its own checks.
-    const locked=await client.query('SELECT execution_generation FROM conversations WHERE business_id=$1 AND session_id=$2 AND id=$3 FOR UPDATE',[business,session,id]);
+    const locked=await client.query(`SELECT c.execution_generation FROM conversations c WHERE ${owned} AND c.id=$4 FOR UPDATE`,[...scope(business,session),id]);
     if(!locked.rowCount)throw new Failure(404,'Conversation not found');
     const columns='id,client_submission_id,text,turn_state,created_at';
-    const inserted=await client.query(`INSERT INTO messages(id,business_id,conversation_id,author,text,client_submission_id,turn_state)
-      VALUES($1,$2,$3,'customer',$4,$5,'queued') ON CONFLICT(conversation_id,client_submission_id) DO NOTHING RETURNING ${columns}`,[randomUUID(),business,id,text,submission]);
+    const inserted=await client.query(`INSERT INTO messages(id,business_id,conversation_id,author,text,client_submission_id,turn_state,session_id)
+      VALUES($1,$2,$3,'customer',$4,$5,'queued',$6) ON CONFLICT(conversation_id,client_submission_id) DO NOTHING RETURNING ${columns}`,[randomUUID(),business,id,text,submission,session.id]);
     if(!inserted.rowCount) {
       // A retried submission returns the original message whatever its turn state; it never enqueues new work.
       const existing=(await client.query(`SELECT ${columns} FROM messages WHERE conversation_id=$1 AND client_submission_id=$2`,[id,submission])).rows[0];

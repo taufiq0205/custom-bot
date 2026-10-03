@@ -1,6 +1,6 @@
 # Custom Bot
 
-Slices 1–3 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, and durable anonymous website chat with labelled simulated replies. The archived configuration prototype remains an interaction reference. Verified Customers, configuration editing, knowledge, provider inference and workflow execution belong to later slices.
+Slices 1–4 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, and verified Customer identity from Business websites. The archived configuration prototype remains an interaction reference. Configuration editing, knowledge, provider inference and workflow execution belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies; no cloud keys or model download is needed for this slice.
 
@@ -31,7 +31,7 @@ Owners select **Manage** beside their Business to invite a verified Operator as 
 
 Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration, credentials and trace APIs remain later slices and return 404 for all roles.
 
-## Website chat (anonymous, simulated)
+## Website chat (simulated)
 
 Every Business starts with an immutable, system-published configuration version 1 whose generation mode is `simulation`; it is created with the Business (and backfilled for existing ones) and cannot be updated or deleted. No provider keys are read in this slice. Every automated reply is labelled `simulated: true` and says that no AI model generated it, and readiness reports `"generation": "simulation"`. A pinned configuration in any other mode fails the turn visibly instead of pretending to generate.
 
@@ -41,16 +41,20 @@ An Owner approves each website that may embed chat (**Manage → Website chat or
 <script src="http://localhost:3100/widget.js" data-business="BUSINESS_ID" defer></script>
 ```
 
-Customer API (every request needs an approved `Origin`; no cookies; `Authorization: Bearer <token>` identifies the browser's anonymous session):
+Customer API (every request needs an approved `Origin`; no cookies; `Authorization: Bearer <token>` identifies the browser's chat session, anonymous or verified):
 
 - `POST /api/chat/:businessId/conversations` `{}` — without a token, creates an anonymous session and returns its `token` once (only a SHA-256 verifier is stored); with a token, starts another conversation in that session. New conversations pin the current published configuration version.
-- `GET /api/chat/:businessId/conversations` — this session's conversations only.
+- `GET /api/chat/:businessId/conversations` — an anonymous session's own conversations, or all of a verified Customer's conversations in this Business.
 - `GET /api/chat/:businessId/conversations/:id` — `control_state`, `configuration_version`, `mode` and ordered messages (`author`, `text`, `simulated`, `reply_to`, `turn_state`).
 - `POST /api/chat/:businessId/conversations/:id/messages` `{ "client_submission_id": "8–100 of A-Z a-z 0-9 _ -", "text": "1–2000 characters" }` — `202` when accepted (a reply is not yet delivered), `200` with the original message for a retried ID, `409` if the ID was used for different text.
 
 Unapproved/missing origins and unknown Businesses return the same `403` without CORS access; invalid or foreign-Business tokens return `401`; another session's conversation returns `404`. Each message creates one durable turn job. The worker claims the oldest turn per conversation in a short transaction with a lease bounded by the 60-second execution deadline, holds no transaction during the external step, and accepts its result only while its lease and the conversation's execution generation are current. Expired leases (for example a worker crash) and missed deadlines mark the turn `failed` with a visible notice; nothing is replayed, and retrying the same submission ID returns the failed original. Restart preserves sessions, conversations and messages. The widget stores its token in the website's `localStorage`, renders text only, and reuses a submission ID only to retry the same unsent text.
 
-Deferred to later slices: verified Customers and session expiry (#16), human takeover (#18), workflow execution and real providers (#19, #28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+### Verified Customers
+
+A Business website that signs in its own customers can verify them in chat. Its server signs a short-lived ES256 JWT with a key whose public half an Owner registered (`/api/businesses/:id/customer-keys`; API only). The widget tag carries it as `data-assertion`. `POST /api/chat/:businessId/identity` `{ "assertion": "…" }` links only the current anonymous conversation; `POST /api/chat/:businessId/logout` `{}` ends the session. Both rotate the session token. Logout, account switching and assertion expiry end access to earlier history at once, and replies that arrive afterwards are not delivered. Email and phone never identify or merge Customers. The full integration contract (claims, algorithm, keys, lifetimes) is in [docs/customer-identity.md](docs/customer-identity.md).
+
+Deferred to later slices: human takeover (#18), workflow execution and real providers (#19, #28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
 
 Public Operator APIs: Better Auth endpoints under `/api/auth` (sign-up/email, sign-in/email, sign-out, get-session, email-otp/send-verification-otp, email-otp/verify-email, email-otp/request-password-reset, email-otp/reset-password); `GET/POST /api/businesses`; `GET /api/businesses/:id`; `GET /health/ready`. Business creation accepts only `{ "name": "Example" }`; arbitrary ownership fields are rejected. Unauthorized Business selectors return 404.
 
@@ -66,6 +70,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) and [website chat validation](docs/validation-15.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.

@@ -7,7 +7,9 @@ const mailBase = process.env.MAIL_URL || 'http://localhost:8025';
 export async function limited(send) {
   const first=await send();
   if(first.status!==429)return first;
-  await new Promise(r=>setTimeout(r,1000*(Number(first.headers.get('retry-after'))||10)+100));
+  // Better Auth 1.7.7's database store can send a nonsensical X-Retry-After, so clamp to its longest window (60 s).
+  const seconds=Number(first.headers.get('x-retry-after'));
+  await new Promise(r=>setTimeout(r,1000*(seconds>=1&&seconds<=60?seconds:60)+100));
   return send();
 }
 export async function client() {
@@ -63,7 +65,8 @@ export async function invitationToken(email) {
 
 export async function operator(prefix) {
   const a=await account(prefix);
-  assert.equal((await a.request('/api/auth/email-otp/verify-email',{email:a.email,otp:await otp(a.email,'email-verification')})).status,200);
+  const code=await otp(a.email,'email-verification');
+  assert.equal((await limited(()=>a.request('/api/auth/email-otp/verify-email',{email:a.email,otp:code}))).status,200);
   const login=await limited(()=>a.request('/api/auth/sign-in/email',{email:a.email,password:a.password}));
   assert.equal(login.status,200);
   return {...a,id:login.data.user.id,cookie:login.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')};

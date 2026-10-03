@@ -25,6 +25,7 @@ SIMULATED = ('Simulated reply: no AI model generated this text, and it contains 
 INTERRUPTED = ('This message was interrupted before a reply and was not retried automatically. '
                'Send it again if you still need help.')
 UNAVAILABLE = 'This message was not answered because connected generation is unavailable.'
+SESSION_ENDED = 'This message was not answered because its chat session ended (sign-out, account switch or expiry).'
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 
@@ -55,6 +56,15 @@ def fail(connection, job, notice, error):
     connection.execute("UPDATE conversations SET last_message_at=clock_timestamp() WHERE id=%s", (job[2],))
 
 
+def identity_current(connection, message_id):
+    """The submitting session is still live and still the conversation's identity.
+    Take this share lock before the conversation lock (the API's order), so identity changes and results serialize without deadlock."""
+    return connection.execute(
+        "SELECT 1 FROM messages m JOIN chat_sessions s ON s.id=m.session_id JOIN conversations c ON c.id=m.conversation_id "
+        "WHERE m.id=%s AND s.ended_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>clock_timestamp()) "
+        "AND c.customer_id IS NOT DISTINCT FROM s.customer_id FOR SHARE OF s", (message_id,)).fetchone()
+
+
 def recover(connection):
     """Expired leases and missed deadlines fail visibly; their turns are never replayed."""
     while True:
@@ -78,13 +88,14 @@ def claim(connection):
     with connection.transaction():
         # Oldest queued turn (by message order) whose conversation has no earlier unfinished turn.
         candidate = connection.execute(
-            "SELECT j.id,j.conversation_id FROM jobs j JOIN messages m ON m.id=j.message_id "
+            "SELECT j.id,j.conversation_id,j.message_id FROM jobs j JOIN messages m ON m.id=j.message_id "
             "WHERE j.status='queued' AND j.deadline>clock_timestamp() AND NOT EXISTS("
             "SELECT 1 FROM jobs e JOIN messages em ON em.id=e.message_id WHERE e.conversation_id=j.conversation_id "
             "AND (e.status='running' OR (e.status='queued' AND em.seq<m.seq))) "
             "ORDER BY m.seq LIMIT 1").fetchone()
         if not candidate:
             return None
+        identity = identity_current(connection, candidate[2])
         connection.execute('SELECT 1 FROM conversations WHERE id=%s FOR UPDATE', (candidate[1],))
         job = connection.execute(
             "UPDATE jobs SET status='running', lease_owner=%s, attempts=attempts+1, "
@@ -93,6 +104,9 @@ def claim(connection):
             "SELECT 1 FROM jobs r WHERE r.conversation_id=jobs.conversation_id AND r.status='running') "
             "RETURNING id,business_id,conversation_id,message_id,execution_generation",
             (WORKER, LEASE, candidate[0])).fetchone()
+        if job and not identity:
+            fail(connection, job, SESSION_ENDED, 'session ended before start')
+            return False
         if job:
             connection.execute("UPDATE messages SET turn_state='running' WHERE id=%s", (job[3],))
         return job
@@ -100,6 +114,7 @@ def claim(connection):
 
 def complete(connection, job, text):
     with connection.transaction():
+        identity = identity_current(connection, job[3])
         connection.execute('SELECT 1 FROM conversations WHERE id=%s FOR UPDATE', (job[2],))
         # Accept only while this worker still holds an unexpired lease for the current execution generation.
         current = connection.execute(
@@ -108,6 +123,10 @@ def complete(connection, job, text):
             "AND c.control_state='automated' FOR UPDATE OF j", (job[0], WORKER, job[4])).fetchone()
         if not current:
             print(f'Job {job[0]} late result discarded', flush=True)
+            return
+        if not identity:
+            fail(connection, job, SESSION_ENDED, 'session ended before result')
+            print(f'Job {job[0]} result discarded: chat session ended', flush=True)
             return
         if text is None:
             fail(connection, job, UNAVAILABLE, 'generation unavailable')
@@ -145,7 +164,7 @@ while True:
                 alive_until = time.monotonic() + (LEASE + 5 if job else 10)
                 if job:
                     run(connection, job)
-                else:
+                elif job is None:
                     # ponytail: 250 ms polling and one in-flight turn per worker; add LISTEN/NOTIFY or concurrency when load tests need it.
                     time.sleep(0.25)
     except psycopg.Error:

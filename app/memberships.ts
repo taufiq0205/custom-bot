@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { pool, mode } from './config.js';
 import { mail } from './auth.js';
+import { importJWK } from 'jose';
 export const uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const ttl=mode==='test' ? Number(process.env.TEST_INVITATION_TTL ?? 604800) : 604800;
 if (!Number.isInteger(ttl) || ttl<1 || ttl>604800) throw new Error('Invalid invitation TTL');
@@ -19,7 +20,7 @@ export function keys(value:Record<string,unknown>,expected:string[]) {
   if(Object.keys(value).length!==expected.length || expected.some(k=>!(k in value))) throw new Failure(400,'Unexpected or missing fields');
 }
 export async function memberships(req:IncomingMessage,path:string,user:{id:string,email:string},json:(status:number,value:unknown)=>void) {
-  const match=path.match(new RegExp(`^/api/businesses/(${uuid})/(memberships|invitations|website-origins)(?:/([^/]+))?$`));
+  const match=path.match(new RegExp(`^/api/businesses/(${uuid})/(memberships|invitations|website-origins|customer-keys)(?:/([^/]+))?$`));
   const accept=path==='/api/invitations/accept';
   if(!match&&!accept)return false;
   let client:PoolClient|undefined;
@@ -49,7 +50,8 @@ export async function memberships(req:IncomingMessage,path:string,user:{id:strin
     if(!match)throw new Failure(404,'Not found');
     const [,business,resource,target]=match;
     // Every privileged operation derives authority from the CURRENT Membership in this Business.
-    await client.query('SELECT id FROM businesses WHERE id=$1 FOR UPDATE',[business]);
+    // NO KEY UPDATE still serializes Business administration, but lets chat's foreign-key checks proceed (no deadlock with key removal).
+    await client.query('SELECT id FROM businesses WHERE id=$1 FOR NO KEY UPDATE',[business]);
     const owner=await client.query("SELECT 1 FROM memberships WHERE business_id=$1 AND operator_id=$2 AND active AND role='Owner'",[business,user.id]);
     if(!owner.rowCount)throw new Failure(404,'Business not found');
     let result;
@@ -91,6 +93,26 @@ export async function memberships(req:IncomingMessage,path:string,user:{id:strin
       if(parsed.origin!==input.origin||!(mode==='hosted'?['https:']:['https:','http:']).includes(parsed.protocol))throw new Failure(400,'Website origin must look like https://shop.example.com');
       await client.query(input.approved?'INSERT INTO website_origins(business_id,origin) VALUES($1,$2) ON CONFLICT DO NOTHING':'DELETE FROM website_origins WHERE business_id=$1 AND origin=$2',[business,input.origin]);
       result={rows:[{origin:input.origin,approved:input.approved}]};
+    } else if(resource==='customer-keys' && !target && req.method==='GET') {
+      const listed=await client.query('SELECT kid,issuer,public_jwk AS public_key,created_at FROM customer_signing_keys WHERE business_id=$1 ORDER BY created_at,kid',[business]);
+      await client.query('COMMIT');json(200,listed.rows);return true;
+    } else if(resource==='customer-keys' && !target && req.method==='POST') {
+      // Only a P-256 public key is accepted: the website keeps its private key, and keys never change (rotate with a new kid).
+      keys(input,['kid','issuer','public_key']);
+      const jwk=input.public_key;
+      if(typeof input.kid!=='string'||!/^[A-Za-z0-9._-]{1,100}$/.test(input.kid)||typeof input.issuer!=='string'||!input.issuer||input.issuer.length>200
+        ||!jwk||typeof jwk!=='object'||Object.keys(jwk).sort().join()!=='crv,kty,x,y'||jwk.kty!=='EC'||jwk.crv!=='P-256'||typeof jwk.x!=='string'||typeof jwk.y!=='string')
+        throw new Failure(400,'Provide kid, issuer and an EC P-256 public JWK (kty, crv, x, y only)');
+      try {await importJWK(jwk,'ES256');} catch {throw new Failure(400,'Public key is not a valid P-256 point');}
+      result=await client.query('INSERT INTO customer_signing_keys(business_id,kid,issuer,public_jwk) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING kid,issuer',[business,input.kid,input.issuer,{kty:'EC',crv:'P-256',x:jwk.x,y:jwk.y}]);
+      if(!result.rowCount)throw new Failure(409,'Key ID already registered; register a new kid to rotate');
+      await client.query('COMMIT');json(201,result.rows[0]);return true;
+    } else if(resource==='customer-keys' && target && req.method==='POST') {
+      // Removing a key also ends the Customer sessions it verified.
+      keys(input,[]);
+      result=await client.query('DELETE FROM customer_signing_keys WHERE business_id=$1 AND kid=$2 RETURNING kid',[business,target]);
+      if(!result.rowCount)throw new Failure(404,'Key not found');
+      await client.query('UPDATE chat_sessions SET ended_at=clock_timestamp() WHERE business_id=$1 AND signing_kid=$2 AND ended_at IS NULL',[business,target]);
     } else throw new Failure(404,'Not found');
     await client.query('COMMIT');json(200,target||resource==='website-origins'?result.rows[0]:result.rows);return true;
   } catch(error) {
