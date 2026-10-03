@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { action, agent, attempts, base, business, calls, compose, config, handoff, invitationToken, operator, owned, publish, reply, script, sql, start, wait } from './helpers.mjs';
 
@@ -326,4 +327,7 @@ test('Actions: credentials are encrypted with a key outside the database and nev
   for(const value of [b.secret,keyHex])assert.equal(logs.includes(value),false);
   // Malformed keys stop startup instead of silently disabling credentials.
   assert.throws(()=>compose('run','--rm','--no-deps','-e','ACTION_CREDENTIAL_KEY=short','worker'),e=>e.stderr.includes('64 hex characters'));
+  // The only private-network exemption is refused outside test mode (base Compose file: APP_MODE=local).
+  assert.throws(()=>execFileSync('docker',['compose','-f','compose.yaml','run','--rm','--no-deps','-e','TEST_PUBLIC_HOSTS=internal.fixture.test','worker'],
+    {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000}),e=>e.stderr.includes('test-only'));
 });
