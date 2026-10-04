@@ -15,7 +15,7 @@ Requires this project's `.env`, free loopback ports 3100/8025/3199, locked npm d
 npm ci --ignore-scripts
 npm run typecheck
 docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait --remove-orphans
-node --test tests/website.test.mjs                 # 6 tests, about 2 minutes
+node --test tests/website.test.mjs                 # 7 tests, about 3 minutes
 caffeinate -i npm test
 docker compose up -d --wait --remove-orphans       # leave test mode
 ```
@@ -72,6 +72,8 @@ The API's raw-text scope check was found by the scope test before any mutation: 
 ## Real integration run (2026-10-04)
 
 First run at 16:39 UTC on `5eb4c47`. It was repeated at 17:14 UTC on the reviewed code (`026fac7`) with identical outcomes: `w3.org` again gave 41 pages and 911 passages, in 46 s; the answer used 379 input and 67 output tokens.
+
+Afterwards, the 10 real-site sources of these synthetic Businesses were deleted (the delete endpoint's three statements, in one transaction), so no daily refresh crawls those third-party sites again.
 
 The worker crawled real public sites and used real DeepSeek for one answer. Synthetic Businesses were used, and no key values were printed.
 
