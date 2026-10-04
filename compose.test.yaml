@@ -7,6 +7,9 @@ services:
       TEST_INVITATION_TTL: '20'
       # Test-only synthetic key; it protects nothing. Real deployments set their own outside the database.
       ACTION_CREDENTIAL_KEY: 7e57000000000000000000000000000000000000000000000000000000007e57
+  # Tests exercise real local embeddings, so the test stack always installs and verifies the model.
+  models:
+    profiles: !reset []
   worker:
     environment:
       APP_MODE: test

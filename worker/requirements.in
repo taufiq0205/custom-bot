@@ -1,0 +1,7 @@
+# Top-level worker dependencies. Regenerate the hash lock with:
+# uv pip compile requirements.in --generate-hashes --universal --python-version 3.14 --no-header -o requirements.lock
+psycopg[binary]==3.3.3
+cryptography==50.0.2
+onnxruntime==1.30.0
+tokenizers==0.23.2
+pypdf==6.19.0

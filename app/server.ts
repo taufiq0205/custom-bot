@@ -9,6 +9,7 @@ import { chat } from './chat.js';
 import { configuration } from './configuration.js';
 import { inbox } from './inbox.js';
 import { actions } from './actions.js';
+import { knowledge } from './knowledge.js';
 const authHandler = toNodeHandler(auth);
 const endpoints = new Set(['sign-up/email','sign-in/email','sign-out','get-session','email-otp/send-verification-otp','email-otp/verify-email','email-otp/request-password-reset','email-otp/reset-password']);
 createServer(async (req,res) => {
@@ -21,11 +22,11 @@ createServer(async (req,res) => {
   try {
     if (path === '/health/ready' && req.method === 'GET') {
       try {
-        const worker = await pool.query("SELECT 1 FROM worker_health WHERE id='worker' AND heartbeat > now()-interval '10 seconds'");
+        const worker = await pool.query("SELECT knowledge FROM worker_health WHERE id='worker' AND heartbeat > now()-interval '10 seconds'");
         if (!worker.rowCount) return json(503,{error:'Worker unavailable; inspect worker service logs'});
         await pool.query('SELECT 1 FROM businesses LIMIT 1');
         await mail.verify();
-        return json(200,{status:'ready', app:'ok', database:'ok', worker:'ok', mail:'ok', generation:'simulation'});
+        return json(200,{status:'ready', app:'ok', database:'ok', worker:'ok', mail:'ok', generation:'simulation', knowledge:worker.rows[0].knowledge});
       } catch {return json(503,{error:'Database/migrations or mail unavailable; inspect db, migrate and mail services'});}
     }
     // Website chat enforces each Business's approved origins instead of the Operator app origin.
@@ -42,6 +43,7 @@ createServer(async (req,res) => {
       if (await configuration(req,path,session.user,json)) return;
       if (await inbox(req,path,session.user,json)) return;
       if (await actions(req,path,session.user,json)) return;
+      if (await knowledge(req,path,session.user,json)) return;
       if (path === '/api/businesses' && req.method === 'GET') {
         const result = await pool.query('SELECT b.id,b.name,m.role FROM businesses b JOIN memberships m ON m.business_id=b.id WHERE m.operator_id=$1 AND m.active=true ORDER BY b.created_at,b.id', [session.user.id]);
         return json(200,result.rows);

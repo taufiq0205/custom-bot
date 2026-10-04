@@ -106,7 +106,7 @@ test('Inbox: exactly one competing claim; only the current assignee can send, re
   const seen=await c.read();
   const delivered=seen.messages.filter(m=>m.author==='operator');
   assert.deepEqual(delivered.map(m=>m.text),[reply.text]);
-  assert.deepEqual(Object.keys(delivered[0]).sort(),['client_submission_id','created_at','id','reply_to','simulated','text','turn_state','author'].sort());
+  assert.deepEqual(Object.keys(delivered[0]).sort(),['citations','client_submission_id','created_at','id','reply_to','simulated','text','turn_state','author'].sort());
   assert.equal(delivered[0].client_submission_id,null);
   assert.equal(JSON.stringify(seen).includes(winner.email)||JSON.stringify(seen).includes(winner.id),false,'Customers never see Operator identities');
 

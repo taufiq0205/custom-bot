@@ -49,6 +49,8 @@
       + (state.verified ? ' Signed in: your earlier conversations with this business are available.' : '');
     log.replaceChildren(...conversation.messages.map(m => el('li', {},
       el('strong', {textContent: `${label(m)}: `}), m.text,
+      // Knowledge answers name the documents (and PDF pages) they rely on.
+      m.citations ? el('small', {textContent: ` Sources: ${m.citations.map(c => c.page ? `${c.document}, page ${c.page}` : c.document).join('; ')}.`}) : '',
       m.turn_state === 'queued' || m.turn_state === 'running' ? ' (waiting for reply)' : m.turn_state === 'failed' ? ' (not answered)' : '')));
     const others = list.filter(c => c.id !== state.conversation);
     history.hidden = !others.length;
