@@ -267,7 +267,7 @@ export const handedOff=turn=>{
 export const siteHost='https://site.fixture.test';
 export const site=(key,pages,robots=[])=>control('/site',{key,robots,pages:Object.fromEntries(Object.entries(pages).map(([path,page])=>
   [`/${key}${path}`,typeof page==='string'?{body:page}:page]))});
-export const robotsStatus=(host,status)=>control('/robots',{host,status});
+export const robotsStatus=(host,status,location)=>control('/robots',{host,status,location});
 export const html=(title,body,links=[])=>`<!doctype html><html><head><title>${title}</title></head><body><main>${body}</main>${links.map(l=>`<a href="${l}">${l}</a>`).join(' ')}</body></html>`;
 // Requests the worker made to a key's site (host and path), in order.
 export const visits=async key=>(await calls(key)).filter(c=>c.kind==='site').map(c=>`${c.host}${c.path}`);

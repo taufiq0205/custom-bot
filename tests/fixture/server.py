@@ -93,13 +93,13 @@ class Fixture(BaseHTTPRequestHandler):
         with lock:
             log.append(entry)
             if self.path == '/robots.txt':
-                spec = {'status': robots[host]} if host in robots else {
+                spec = robots[host] if host in robots else {
                     'type': 'text/plain', 'body': '\n'.join(['User-agent: *', *(l for site in sites.values() for l in site.get('robots', []))])}
             else:
                 spec = sites[key]['pages'].get(self.path, {'status': 404, 'body': 'not found'})
         if not self.wait(spec.get('delay', 0), entry):
             return
-        data = spec.get('body', '').encode()
+        data = spec.get('body', '').encode(spec.get('encoding', 'utf-8'))
         self.send_response(spec.get('status', 200))
         if 'location' in spec:
             self.send_header('location', spec['location'])
@@ -126,8 +126,9 @@ class Fixture(BaseHTTPRequestHandler):
                 sites[body['key']] = {'pages': body['pages'], 'robots': body.get('robots', [])}
                 result = {}
             elif self.path == '/robots':
-                # A host's robots.txt answers with this status instead (None restores it).
-                robots.pop(body['host'], None) if body['status'] is None else robots.update({body['host']: body['status']})
+                # A host's robots.txt answers with this status (and location) instead; None restores it.
+                robots.pop(body['host'], None) if body['status'] is None else robots.update(
+                    {body['host']: {'status': body['status'], **({'location': body['location']} if body.get('location') else {})}})
                 result = {}
             elif self.path == '/log':
                 result = [e for e in log if e['key'] == body['key']]

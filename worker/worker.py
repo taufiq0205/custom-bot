@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.robotparser
 import uuid
-from urllib.parse import parse_qsl, urldefrag, urlencode, urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, urldefrag, urlencode, urljoin, urlsplit
 import psycopg
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -808,12 +808,24 @@ def request(method, url, body, deadline, headers=None, page=False):
         connection.close()
 
 
+def link(base, href):
+    """The absolute URL a link or redirect on base points to, without fragment, with raw characters percent-encoded once as a
+    browser would (http.client sends paths as-is); None when malformed."""
+    try:
+        parts = urlsplit(urldefrag(urljoin(base, href.strip()))[0])
+        safe = "/%:@!$&'()*+,;=-._~"
+        return parts._replace(path=quote(parts.path, safe=safe), query=quote(parts.query, safe=safe + '?')).geturl()
+    except ValueError:
+        return None
+
+
 def scoped(url, scope):
     """Whether url lies inside the website scope: the same HTTPS origin, under its path prefix, without credentials, dot segments
-    or encoded separators that a server could decode back out of the prefix."""
+    or encoded separators that a server could decode back out of the prefix, and without a query string (like the approved
+    scope; query variants would otherwise fill the page cap with duplicates)."""
     try:
         parts = urlsplit(url)
-        return (parts.scheme == 'https' and not parts.username and origin(parts) == origin(scope) and parts.path.startswith(scope.path)
+        return (parts.scheme == 'https' and not parts.username and not parts.query and origin(parts) == origin(scope) and parts.path.startswith(scope.path)
                 and not {'.', '..'} & set(parts.path.split('/')) and not re.search(r'%(2e|2f|5c)|\\', parts.path, re.I))
     except ValueError:
         return False
@@ -834,16 +846,19 @@ def crawl(start, required, renew):
             status, location, kind, body = fetch('GET', url, None, seconds, headers, page=True)
             if not 300 <= status < 400:
                 return url, status, kind, body
-            url = urldefrag(urljoin(url, location or ''))[0]
+            url = link(url, location or '')
+            if not url:
+                raise Rejected('it redirects to an invalid URL')
             if reason := denied(url):
                 raise Rejected(f'it redirects to {url}, which is {reason}')
         raise Rejected('too many redirects')
 
-    # RFC 9309: a missing robots.txt (4xx) allows everything; 401/403 are treated as disallowing everything (as Python's parser
-    # does); an unreachable one stops the crawl, since its rules are unknown.
+    # RFC 9309: robots.txt redirects are followed, across hosts too (each hop vetted); a missing robots.txt (4xx) allows
+    # everything; 401/403 are treated as disallowing everything (as Python's parser does); an unreachable one stops the crawl,
+    # since its rules are unknown.
     robots, home = urllib.robotparser.RobotFileParser(), origin(scope)
     try:
-        _, status, _, body = get(f'{home}/robots.txt', lambda url: None if origin(urlsplit(url)) == home else 'on another host')
+        _, status, _, body = get(f'{home}/robots.txt', lambda url: None if url.startswith('https://') else 'not HTTPS')
     except (Transient, Rejected) as failure:
         hint = '; website refresh needs outbound HTTPS (compose.connected.yaml)' if str(failure) == 'connection failed' else ''
         raise knowledge.Unreadable(f'robots.txt of {home} could not be fetched ({failure}){hint}')
@@ -879,7 +894,9 @@ def crawl(start, required, renew):
             mime = kind.split(';')[0].strip().lower()
             if mime not in ('text/html', 'application/xhtml+xml'):
                 raise Rejected(f'it is not HTML ({mime or "no content type"})')
-            charset = re.search(r'charset="?([\w.:-]+)', kind, re.I)
+            # The header's charset, else one declared in the page itself (as legacy pages do), else UTF-8.
+            charset = (re.search(r'charset="?([\w.:-]+)', kind, re.I)
+                       or re.search(r'<meta[^>]+charset=["\']?([\w.:-]+)', body[:4096].decode('ascii', 'replace'), re.I))
             try:
                 text = body.decode(charset[1] if charset else 'utf-8', 'replace')
             except LookupError:
@@ -895,13 +912,13 @@ def crawl(start, required, renew):
             pages.append((final, parsed.text))
         elif url in needed:
             raise knowledge.Unreadable(f'required page {url} has no readable text')
-        for link in parsed.links:
-            link = urldefrag(urljoin(final, link.strip()))[0]
-            if link not in seen and not denied(link):
-                seen.add(link)
+        for href in parsed.links:
+            target = link(final, href)
+            if target and target not in seen and not denied(target):
+                seen.add(target)
                 if len(seen) > MAX_PAGES:
                     raise knowledge.Unreadable(f'the scope has more than {MAX_PAGES} permitted pages; narrow the URL scope')
-                queue.append(link)
+                queue.append(target)
     return pages
 
 
@@ -1004,10 +1021,15 @@ def renew(connection, job):
         raise Lost()
 
 
+# A website's next daily refresh is due a day after its last refresh finishes, whatever the outcome.
+NEXT_REFRESH = "UPDATE knowledge_sources SET next_refresh_at=memory_now(business_id,%s)+interval '1 day' WHERE kind='website' AND id="
+
+
 def settle(connection, job, error):
     """A failed or discarded candidate: the active version, if any, stays in use. Whoever locks more than one of these
     takes them in the order source, job, version."""
     with connection.transaction():
+        connection.execute(NEXT_REFRESH + "(SELECT source_id FROM source_versions WHERE id=%s)", (TESTING, job[2]))
         connection.execute("UPDATE jobs SET status='failed', lease_owner=NULL, error=%s WHERE id=%s", (error, job[0]))
         connection.execute("UPDATE source_versions SET state='failed', error=%s, content=NULL, finished_at=memory_now(business_id,%s) "
                            "WHERE id=%s AND state IN ('queued','running')", (error, TESTING, job[2]))
@@ -1046,6 +1068,7 @@ def ingest(connection, job):
             "JOIN knowledge_sources s ON s.id=v.source_id LEFT JOIN source_versions a ON a.id=s.active_version_id WHERE v.id=%s FOR UPDATE OF s",
             (job[2],)).fetchone()
         renew(connection, job)
+        connection.execute(NEXT_REFRESH + "%s", (TESTING, source[0]))
         # A deleted source never activates again; nor does a candidate older than the active version or than an expiry.
         activate = source[1] and not (source[3] is not None and source[3] >= source[4])
         if activate:
@@ -1079,10 +1102,12 @@ def requeue(connection, business, version):
 
 def reindex(connection):
     """Active versions embedded under another model or policy are never compared with today's queries; queue a complete new
-    candidate from the same document (or a fresh crawl of the same website scope) for each. It activates only when complete."""
+    candidate from the same document (or a fresh crawl of the website's latest approved scope) for each. It activates only when
+    complete."""
     with connection.transaction():
         for business, source, version in connection.execute(
-                "SELECT s.business_id,s.id,a.id FROM knowledge_sources s JOIN source_versions a ON a.id=s.active_version_id "
+                "SELECT s.business_id,s.id,CASE WHEN s.kind='website' THEN (SELECT id FROM source_versions WHERE source_id=s.id ORDER BY seq DESC LIMIT 1) "
+                "ELSE a.id END FROM knowledge_sources s JOIN source_versions a ON a.id=s.active_version_id "
                 "WHERE s.deleted_at IS NULL AND a.encoding<>%s AND NOT EXISTS(SELECT 1 FROM source_versions c WHERE c.source_id=s.id "
                 "AND c.state IN ('queued','running')) FOR UPDATE OF s SKIP LOCKED", (EMBEDDER.encoding,)).fetchall():
             requeue(connection, business, version)
@@ -1090,8 +1115,9 @@ def reindex(connection):
 
 
 def schedule(connection):
-    """Daily refresh: a live website source is crawled again a day after its last queued refresh (manual or scheduled), unless
-    one is still pending. The row lock orders this against deletion and manual refreshes, so a deleted source is never queued."""
+    """Daily refresh: a live website source is crawled again a day after its last refresh finished (or was requested, while one is
+    pending), so a refresh that comes due mid-crawl is not repeated right after it. The row lock orders this against deletion and
+    manual refreshes, so a deleted source is never queued."""
     with connection.transaction():
         for business, source, latest in connection.execute(
                 "SELECT s.business_id,s.id,(SELECT id FROM source_versions WHERE source_id=s.id ORDER BY seq DESC LIMIT 1) "

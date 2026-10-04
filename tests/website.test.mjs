@@ -166,6 +166,37 @@ test('Website scope: same-host path scope and robots.txt are enforced, private d
   assert.deepEqual([unchanged.latest.id,unchanged.website.url],[help.latest.id,scope]);
 });
 
+test('Website links: encoded, malformed and query-string links and a legacy charset never break a refresh; robots.txt may redirect to another vetted host',async()=>{
+  const t=await team();
+  const b=await business('website-links',{owner:t.owner});
+  const key=`links-${crypto.randomUUID()}`,scope=`${siteHost}/${key}/`;
+  await site(key,{
+    '/':html('Guides','Index of our guides.',['café','size guide','size%20guide','https://[oops','?sort=asc','legacy']),
+    '/caf%C3%A9':html('Café','The café opens at eight.'),
+    '/size%20guide':html('Size guide','Our sizes run small.'),
+    // Declared only in the page, as legacy sites do.
+    '/legacy':{type:'text/html',encoding:'latin1',body:'<html><head><meta charset="windows-1252"><title>Desserts</title></head><body><p>Crème brûlée is served daily.</p></body></html>'},
+  });
+  assert.equal((await addWebsite(b,'links',scope)).status,202);
+  const s=await active(b,'links',scope);
+  // Raw non-ASCII and spaces are percent-encoded as a browser would (once); the malformed link and the query-string variant are skipped.
+  assert.equal(s.active.pages,4);
+  assert.deepEqual([...await visits(key)].sort(),['/','/caf%C3%A9','/legacy','/size%20guide'].map(p=>`site.fixture.test/${key}${p}`).sort());
+  const chunk=where=>sql(`SELECT count(*) FROM source_chunks WHERE version_id='${s.latest.id}' AND ${where}`);
+  assert.equal(chunk(`url='${scope}caf%C3%A9' AND content LIKE '%café opens%'`),'1');
+  assert.equal(chunk(`content LIKE '%Crème brûlée is served daily.%'`),'1');
+  // RFC 9309: robots.txt redirects are followed across hosts, each hop vetted like every other request.
+  const other=`https://other.fixture.test/${key}/`;
+  try {
+    await robotsStatus('other.fixture.test',301,`${siteHost}/robots.txt`);
+    assert.equal((await addWebsite(b,'moved-robots',other)).status,202);
+    assert.equal((await active(b,'moved-robots',other)).active.pages,4);
+    await robotsStatus('other.fixture.test',301,'https://internal.fixture.test/robots.txt');
+    await refresh(b,'moved-robots');
+    assert.equal((await ingested(b,'moved-robots')).latest.error,'robots.txt of https://other.fixture.test could not be fetched (destination address not permitted)');
+  } finally {await robotsStatus('other.fixture.test',null);}
+});
+
 test('Website page cap and completeness: at most 100 permitted pages; overflow, a missing required page or a failing page fails the whole refresh and keeps the previous snapshot',async()=>{
   const t=await team();
   const b=await business('website-cap',{owner:t.owner});
@@ -265,6 +296,16 @@ test('Website refresh: manual and daily refreshes activate only complete snapsho
   assert.deepEqual([s.latest.state,s.warning,s.fresh],['active',null,true]);
   assert(new Date(s.website.next_refresh_at)-new Date(due)>=86400000,'the next daily refresh is a day later');
   assert.match(await ask(),/costs 1 dollar/);
+
+  // A refresh that comes due while another is pending counts that one: no second crawl follows it.
+  await site(key,{'/':html('','[hold 4s] Gift wrapping costs 2 dollars.'),'/details':details});
+  const held=(await refresh(b,'gifts')).data.version.id;
+  for(let i=0;i<40&&(await source(b,'gifts')).latest.state!=='running';i++)await wait(250);
+  clockAt(b,`'${(await source(b,'gifts')).website.next_refresh_at}'::timestamptz+interval '1 second'`);
+  s=await ingested(b,'gifts');
+  assert.deepEqual([s.latest.id,s.latest.state],[held,'active']);
+  await wait(3000);
+  assert.equal((await source(b,'gifts')).latest.id,held,'no refresh is queued right after the pending one');
 });
 
 test('Website freshness: evidence is excluded seven days after the last successful refresh, at once and in flight, while documents stay eligible',async()=>{

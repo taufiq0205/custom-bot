@@ -124,7 +124,7 @@ export async function knowledge(req:IncomingMessage,path:string,user:{id:string}
         FROM knowledge_sources s LEFT JOIN source_versions a ON a.id=s.active_version_id
         CROSS JOIN LATERAL (SELECT * FROM source_versions WHERE source_id=s.id ORDER BY seq DESC LIMIT 1) l
         WHERE s.business_id=$1 AND s.deleted_at IS NULL ORDER BY s.ref`,[business,mode==='test'])).rows.map(({expired,...s})=>{
-        const failed=s.latest.state==='failed'&&s.latest.error,when=(t:string)=>new Date(t).toISOString();
+        const failed=s.latest.state==='failed'&&(s.latest.error||'unknown error'),when=(t:string)=>new Date(t).toISOString();
         return {...s,warning:s.kind==='website'
           ?s.active&&!s.fresh?`Website evidence expired ${when(s.active.fresh_until)}, 7 days after its last successful refresh: not used for answers.${failed?` The latest refresh failed: ${failed}.`:''} A successful refresh makes it usable again.`
             :!failed?null:s.active?`The latest refresh failed: ${failed}. Answers still use the snapshot refreshed ${when(s.active.activated_at)} until ${when(s.active.fresh_until)}.`
