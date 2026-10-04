@@ -361,6 +361,8 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   await supportPage.getByText('Browser Config — Support',{exact:true}).waitFor();
   assert.equal(await supportPage.getByRole('button',{name:'Manage Browser Config',exact:true}).count(),0);
   assert.equal(await supportPage.getByLabel('Configuration JSON').isVisible(),false);
+  // Support's Owner-only rail sections stay disabled.
+  for(const name of ['Configuration','Team and website'])assert.equal(await supportPage.getByRole('button',{name,exact:true}).isDisabled(),true,name);
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
 });
