@@ -42,6 +42,7 @@ test('browser: an Owner allows and withdraws provider generation, with readiness
       await page.getByText('Processing: Singapore access and static storage; inference potentially worldwide excluding Chinese mainland (not Singapore-only processing).',{exact:true}).waitFor();
       await page.getByText(/^Endpoint https:\/\/api\.deepseek\.com\. Key configured; account and model access not verified/).waitFor();
       await page.getByText(`Endpoint ${QWEN_BASE}. Key configured; account and model access not verified until a measured run.`,{exact:true}).waitFor();
+      await page.getByText('Published version 2 (connected): answer uses deepseek/deepseek-flash.',{exact:true}).waitFor();
       const deepseek=page.getByLabel('Allow DeepSeek generation'),qwen=page.getByLabel('Allow Qwen generation');
       if(width===1280) {
         assert.equal(await deepseek.isChecked(),false);
@@ -251,7 +252,7 @@ test('Providers: Owner-only controls, readiness disclosure, fallback validation 
   assert.deepEqual(readiness.generation,{simulation:'always available, labelled as simulated',
     deepseek:{endpoint:'https://api.deepseek.com',key:'configured; account and model access not verified until a measured run',role:'final replies'},
     qwen:{endpoint:QWEN_BASE,key:'configured; account and model access not verified until a measured run',
-      role:'one fallback attempt after a transient DeepSeek failure, when permitted',
+      role:'one fallback attempt after a transient DeepSeek failure, or an agent\'s selected model; when permitted',
       processing:'Singapore access and static storage; inference potentially worldwide excluding Chinese mainland (not Singapore-only processing)'}});
 
   const b=await business('providers-controls',{owner});
@@ -260,6 +261,7 @@ test('Providers: Owner-only controls, readiness disclosure, fallback validation 
   const path=`/api/businesses/${b.id}/provider-permissions`;
   const listing=(await owner.request(path)).data;
   assert.deepEqual(listing.providers,{deepseek:readiness.generation.deepseek,qwen:readiness.generation.qwen});
+  assert.deepEqual(listing.selected,{version:1,mode:'simulation',agents:[]});
   assert.deepEqual(listing.permissions.map(p=>[p.provider,p.operation,p.allowed]),
     [['deepseek','generation',true],['deepseek','extraction',false],['qwen','generation',false],['qwen','extraction',false]]);
   for(const who of [support,outsider]) {
@@ -281,6 +283,9 @@ test('Providers: Owner-only controls, readiness disclosure, fallback validation 
   assert.deepEqual((await validation(single(key,{fallback:{provider:'deepseek',name:'deepseek-flash'}}))).map(e=>e.path),['/agents/0/model/fallback/provider']);
   assert.deepEqual((await validation(single(key,{fallback:{provider:'qwen',name:QWEN,temperature:1}}))).map(e=>e.path),['/agents/0/model/fallback/temperature']);
 
+  // The listing names the models and fallback that new conversations use.
+  await publish(b,single(key,{fallback}));
+  assert.deepEqual((await owner.request(path)).data.selected,{version:2,mode:'connected',agents:[{agent:'answer',model:'deepseek/deepseek-flash',fallback:`qwen/${QWEN}`}]});
   // A provider rejection that echoes the key reveals it nowhere.
   await publish(b,single(key));
   const marker=`private-customer-text-${crypto.randomUUID()}`;

@@ -4,8 +4,8 @@ import { createCipheriv, randomBytes } from 'node:crypto';
 import { credentialKey, pool } from './config.js';
 import { FIELD, publicHttps, REF } from './configuration.js';
 import { body, Failure, keys, uuid } from './memberships.js';
-const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63})|(provider-permissions)(?:/(deepseek|qwen)/(generation|extraction))?)$`);
 const PROVIDERS=['deepseek','qwen'],OPERATIONS=['generation','extraction'];
+const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63})|(provider-permissions)(?:/(${PROVIDERS.join('|')})/(${OPERATIONS.join('|')}))?)$`);
 // Visible ASCII; no CR/LF can reach a request header.
 const SECRET=/^[\x21-\x7e](?:[\x20-\x7e]{0,4094}[\x21-\x7e])?$/;
 
@@ -33,11 +33,15 @@ export async function actions(req:IncomingMessage,path:string,user:{id:string},j
     if(!(await client.query("SELECT 1 FROM memberships WHERE business_id=$1 AND operator_id=$2 AND active AND role='Owner'",[business,user.id])).rowCount)throw new Failure(404,'Business not found');
     let result;
     if(listing&&permissions) {
-      // Every provider/operation pair, off unless granted, with the worker's key/endpoint readiness (never key values).
+      // Every provider/operation pair, off unless granted, the worker's key/endpoint readiness (never key values), and the models
+      // and fallbacks the latest published version (used by new conversations) selects.
       const granted=(await client.query('SELECT provider,operation,allowed,revision,updated_at FROM provider_permissions WHERE business_id=$1',[business])).rows;
       const worker=(await client.query("SELECT generation FROM worker_health WHERE id='worker'")).rows[0];
+      const published=(await client.query('SELECT version,document FROM published_configurations WHERE business_id=$1 ORDER BY version DESC LIMIT 1',[business])).rows[0];
       result={permissions:PROVIDERS.flatMap(p=>OPERATIONS.map(o=>granted.find(g=>g.provider===p&&g.operation===o)??{provider:p,operation:o,allowed:false,revision:null,updated_at:null})),
-        providers:worker?.generation??null};
+        providers:worker?.generation??null,
+        selected:{version:published.version,mode:published.document.generation.mode,agents:published.document.agents.filter((a:any)=>a.model).map((a:any)=>
+          ({agent:a.id,model:`${a.model.provider}/${a.model.name}`,fallback:a.model.fallback?`${a.model.fallback.provider}/${a.model.fallback.name}`:null}))}};
     } else if(listing) {
       result={credentials:(await client.query('SELECT ref,origin,header,active,revision,updated_at FROM action_credentials WHERE business_id=$1 ORDER BY ref',[business])).rows,
         policies:(await client.query('SELECT ref,customer_parameter,owner_field,active,revision,updated_at FROM authorization_policies WHERE business_id=$1 ORDER BY ref',[business])).rows,

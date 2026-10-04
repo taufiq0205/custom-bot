@@ -42,20 +42,23 @@ PROVIDERS = {'deepseek': ('https://api.deepseek.com', 'DEEPSEEK_API_KEY'),
 KEYS = {provider: os.environ.get(variable, '') for provider, (_, variable) in PROVIDERS.items()}
 QWEN_SCOPE = ('Singapore access and static storage; inference potentially worldwide excluding Chinese mainland '
               '(not Singapore-only processing)')
-GENERATION = {provider: {'endpoint': base, 'key': ('configured; account and model access not verified until a measured run'
-                                                   if KEYS[provider] else f'missing: set {variable} for the worker'),
-                         **({'role': 'one fallback attempt after a transient DeepSeek failure, when permitted',
-                             'processing': QWEN_SCOPE} if provider == 'qwen' else {'role': 'final replies'})}
-              for provider, (base, variable) in PROVIDERS.items()}
+KEY_STATE = {provider: 'configured; account and model access not verified until a measured run' if KEYS[provider]
+             else f'missing: set {variable} for the worker' for provider, (_, variable) in PROVIDERS.items()}
+GENERATION = {'deepseek': {'endpoint': PROVIDERS['deepseek'][0], 'key': KEY_STATE['deepseek'], 'role': 'final replies'},
+              'qwen': {'endpoint': PROVIDERS['qwen'][0], 'key': KEY_STATE['qwen'], 'processing': QWEN_SCOPE,
+                       'role': 'one fallback attempt after a transient DeepSeek failure, or an agent\'s selected model; when permitted'}}
 # Optional cost estimates: {"provider/model": [USD per million input tokens, USD per million output tokens]}. Without a rate,
 # cost is not estimated. ponytail: one input rate, cache-hit discounts ignored; split rates if cost reports need them.
 try:
     RATES = json.loads(os.environ.get('PROVIDER_RATES') or '{}')
-    assert isinstance(RATES, dict) and all(isinstance(v, list) and len(v) == 2 and all(isinstance(x, (int, float)) and x >= 0 for x in v)
-                                           for v in RATES.values())
-except (ValueError, AssertionError):
+except ValueError:
+    RATES = None
+if not (isinstance(RATES, dict) and all(isinstance(v, list) and len(v) == 2 and all(isinstance(x, (int, float)) and x >= 0 for x in v)
+                                        for v in RATES.values())):
     sys.exit('PROVIDER_RATES must be JSON like {"deepseek/deepseek-flash": [0.27, 1.1]} (USD per million input/output tokens)')
 TLS = ssl.create_default_context(cafile=os.environ.get('TEST_CA_FILE'))
+# (served model, prompt tokens, completion tokens, cost estimate) of an attempt without a usable response.
+UNMEASURED = (None, None, None, None)
 DATABASE = os.environ['DATABASE_URL']
 WORKER = f'{os.uname().nodename}-{uuid.uuid4()}'
 HOLD = re.compile(r'^\[hold (\d{1,2})s\]')
@@ -362,7 +365,7 @@ class Turn:
         alive_until = max(alive_until, time.monotonic() + bound + 5)
         return attempt, grant
 
-    def end(self, attempt, status, error, measured=(None, None, None, None)):
+    def end(self, attempt, status, error, measured=UNMEASURED):
         self.connection.execute("UPDATE execution_attempts SET status=%s,error=%s,finished_at=clock_timestamp(),served_model=%s,"
                                 "prompt_tokens=%s,completion_tokens=%s,cost_usd=%s WHERE id=%s", (status, error, *measured, attempt))
 
@@ -377,8 +380,8 @@ class Turn:
                 raise Rejected(f'qwen fallback unavailable: {PROVIDERS[provider][1]} not set')
             raise Stop(UNAVAILABLE, f'generation unavailable: {PROVIDERS[provider][1]} not set')
         target, bound = f'{provider}/{name}', min(60, self.left())
-        attempt, permit = self.begin(step, 'provider', target, bound, permit=(provider, 'generation'), fallback=fallback)
-        status, error, measured, recorded, started = 'failed', 'aborted', (None, None, None, None), False, time.monotonic()
+        attempt, revision = self.begin(step, 'provider', target, bound, permit=(provider, 'generation'), fallback=fallback)
+        status, error, measured, recorded, started = 'failed', 'aborted', UNMEASURED, False, time.monotonic()
         try:
             payload = {**body, 'model': name, **({'enable_thinking': False} if provider == 'qwen' else {})}
             # Lock waits above came out of the remaining time.
@@ -396,7 +399,7 @@ class Turn:
                 raise Rejected('incomplete provider output')
             with self.connection.transaction():
                 held = current(self.connection, self.job, True)
-                accepted = held and permitted(self.connection, self.job[1], provider, 'generation') == permit
+                accepted = held and permitted(self.connection, self.job[1], provider, 'generation') == revision
                 if accepted:
                     status, error, recorded = 'succeeded', None, True
                     self.end(attempt, status, error, measured)
@@ -405,7 +408,7 @@ class Turn:
             if not accepted:
                 # A revoked or changed permission defeats a delayed output.
                 raise Rejected('provider permission changed')
-            self.permits[(provider, 'generation')] = permit
+            self.permits[(provider, 'generation')] = revision
             return content
         except (Transient, Rejected) as failure:
             error = str(failure)
@@ -747,9 +750,8 @@ def request(method, url, body, deadline, headers=None):
         connection.close()
 
 
-def finish(connection, job, outcome, text=None, grants=(), versions=(), citations=(), permits=None):
+def finish(connection, job, outcome, text=None, grants=(), versions=(), citations=(), permits={}):
     """Accept the turn's result only while it still holds authority; a failure or handoff step hands off in the same transaction."""
-    permits = permits or {}
     with connection.transaction():
         if not current(connection, job, bool(grants or permits)):
             return

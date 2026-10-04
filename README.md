@@ -131,7 +131,7 @@ Current limits of this slice:
 
 ## Providers (connected generation)
 
-Connected agents generate with DeepSeek at `https://api.deepseek.com`, and may name one Qwen fallback at exactly `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. Both use `POST …/chat/completions` in JSON mode. Qwen is sent `enable_thinking: false`, because its JSON mode does not support thinking.
+Connected agents generate with DeepSeek at `https://api.deepseek.com` (an agent may also select a Qwen model directly, under Qwen's permission), and may name one Qwen fallback at exactly `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. Both use `POST …/chat/completions` in JSON mode. Qwen is sent `enable_thinking: false`, because its JSON mode does not support thinking.
 
 **Keys.** Set `DEEPSEEK_API_KEY` and `DASHSCOPE_API_KEY` (a Singapore/International Model Studio key) in `.env`. Only the worker receives them, and each is sent only to its own endpoint. No key value appears in the app container, API responses, configuration, prompts, attempt rows or logs. Without a key, a connected agent is unavailable: the turn fails visibly to support and nothing is sent. Simulation is unaffected.
 
@@ -144,7 +144,7 @@ docker compose -f compose.yaml -f compose.connected.yaml up -d --wait
 Never combine it with `compose.test.yaml`; the tests prove the worker runs without egress.
 
 **Permissions.** Nothing is sent to a provider unless an Owner currently allows it for that Business and operation (**Team and website → Cloud providers**, or the API). Support Members and other Businesses get `404`.
-- `GET /api/businesses/:id/provider-permissions`: every `{provider, operation, allowed, revision, updated_at}` pair (off until allowed), and `providers`, the worker's endpoint/key readiness.
+- `GET /api/businesses/:id/provider-permissions`: every `{provider, operation, allowed, revision, updated_at}` pair (off until allowed), `providers`, the worker's endpoint/key readiness, and `selected`: the latest published version's mode and each agent's `model` and `fallback` (what new conversations use).
 - `POST /api/businesses/:id/provider-permissions/:provider/:operation` `{ "allowed": true | false }`, with provider `deepseek` or `qwen` and operation `generation` or `extraction`. Extraction permissions are recorded now; Customer memory (#23) will use them.
 
 Like action controls, permissions are live and override pinned configuration versions. The worker checks the provider's permission before each attempt, and checks that it is unchanged before accepting the output and before delivering the reply. Every change bumps the revision, so revoking (even if allowed again at once) discards output already in flight. An agent's output also cannot travel to a later provider call once its own provider's permission changed.

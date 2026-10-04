@@ -104,16 +104,18 @@ async function refreshMemberships() {
     li.append(button);return li;
   }));
   // Generation permissions only; extraction permissions arrive with Customer memory.
-  const {permissions,providers}=await request(path+'/provider-permissions');
-  const shown=[['deepseek','DeepSeek','final replies'],['qwen','Qwen','one fallback attempt after a transient DeepSeek failure']];
-  document.querySelector('#providers').replaceChildren(...shown.map(([id,name,role])=>{
+  const {permissions,providers,selected}=await request(path+'/provider-permissions');
+  const shown=[['deepseek','DeepSeek'],['qwen','Qwen']];
+  const models=Object.assign(document.createElement('li'),{textContent:`Published version ${selected.version} (${selected.mode}): `+(selected.agents.map(a=>
+    `${a.agent} uses ${a.model}${a.fallback?`, fallback ${a.fallback}`:''}`).join('; ')||'no agent selects a model')+'.'});
+  document.querySelector('#providers').replaceChildren(models,...shown.map(([id,name])=>{
     const li=document.createElement('li'),label=document.createElement('label'),box=document.createElement('input');
     box.type='checkbox';box.checked=permissions.some(p=>p.provider===id&&p.operation==='generation'&&p.allowed);
     box.addEventListener('change',()=>run(async()=>{await request(`${path}/provider-permissions/${id}/generation`,{allowed:box.checked});
       status.textContent=`${name} generation ${box.checked?'allowed':'not allowed'}.`;}));
     label.append(box,` Allow ${name} generation`);
     const report=providers?.[id];
-    li.append(Object.assign(document.createElement('span'),{textContent:`${name}: ${role}`}),label,
+    li.append(Object.assign(document.createElement('span'),{textContent:`${name}: ${report?.role??'role unknown'}`}),label,
       Object.assign(document.createElement('p'),{className:'help',textContent:report?`Endpoint ${report.endpoint}. Key ${report.key}.`:'Worker readiness unavailable.'}));
     if(report?.processing)li.append(Object.assign(document.createElement('p'),{className:'warning',textContent:`Processing: ${report.processing}.`}));
     return li;
