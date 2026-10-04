@@ -275,6 +275,14 @@ async function loadConversation(polled=false) {
   document.querySelector('#inbox-conversation').hidden=false;
   const mine=c.assignee_id===inbox.operator_id;
   document.querySelector('#inbox-meta').textContent=`${states[c.control_state]}${c.assignee_email?`, assigned to ${mine?'you':c.assignee_email}`:''}${c.handoff_reason?`. Reason: ${c.handoff_reason}`:''}. ${c.verified?'Verified Customer':'Anonymous Customer'}.`;
+  const panel=document.querySelector('#inbox-memory');
+  panel.hidden=!c.verified;
+  if(c.verified&&!polled) {
+    const data=await request(`${inboxPath()}/conversations/${id}/memory`);
+    if(opened?.id===id)window.memoryControls(panel,data,input=>run(async()=>{
+      await request(`${inboxPath()}/conversations/${id}/memory`,input);await loadConversation();status_('Memory updated.');
+    }),false);
+  }
   const who=m=>m.author==='customer'?'Customer':m.author==='operator'?`Support (${m.operator_email})`:m.author==='system'?'Notice':m.simulated?'Simulated assistant':'Assistant';
   const sources=m=>m.citations?` (Sources: ${m.citations.map(x=>x.page?`${x.document}, page ${x.page}`:x.document).join('; ')})`:'';
   document.querySelector('#inbox-messages').replaceChildren(...c.messages.map(m=>Object.assign(document.createElement('li'),{textContent:`${who(m)}: ${m.text}${sources(m)}`})));

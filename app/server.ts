@@ -7,6 +7,7 @@ import { origin, pool } from './config.js';
 import { memberships } from './memberships.js';
 import { chat } from './chat.js';
 import { configuration } from './configuration.js';
+import { operatorMemory } from './memory.js';
 import { inbox } from './inbox.js';
 import { actions } from './actions.js';
 import { knowledge } from './knowledge.js';
@@ -43,6 +44,7 @@ createServer(async (req,res) => {
       if (!session?.user.emailVerified) return json(401,{error:'Verified Operator sign-in required'});
       if (await memberships(req,path,session.user,json)) return;
       if (await configuration(req,path,session.user,json)) return;
+      if (await operatorMemory(req,path,session.user,json)) return;
       if (await inbox(req,path,session.user,json)) return;
       if (await actions(req,path,session.user,json)) return;
       if (await knowledge(req,path,session.user,json)) return;
@@ -75,7 +77,7 @@ createServer(async (req,res) => {
       }
       return json(404,{error:'Not found'});
     }
-    const files: Record<string,string> = {'/':'index.html','/ui.js':'ui.js','/workflow-editor.js':'workflow-editor.js','/style.css':'style.css','/widget.js':'widget.js'};
+    const files: Record<string,string> = {'/':'index.html','/ui.js':'ui.js','/workflow-editor.js':'workflow-editor.js','/style.css':'style.css','/widget.js':'widget.js','/memory-controls.js':'memory-controls.js'};
     if (req.method==='GET' && files[path]) {
       res.setHeader('Content-Type', path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');
       return res.end(await readFile(`app/public/${files[path]}`));

@@ -5,6 +5,7 @@
 <title>Custom Bot — Operator</title>
 <link rel="stylesheet" href="/style.css">
 <script src="/workflow-editor.js" defer></script>
+<script src="/memory-controls.js" defer></script>
 <script src="/ui.js" defer></script>
 <body>
 <div class="app" id="app" data-view="account">
@@ -172,6 +173,7 @@
 <ol id="inbox-messages" class="messages" role="log" aria-live="polite"></ol>
 <h4>Order lookups</h4>
 <p class="help">Historical observations: each shows what the business API returned at that time, not current status.</p>
+<section id="inbox-memory" aria-label="Customer memory"></section>
 <ul id="inbox-lookups" class="rows mono"></ul>
 <div class="actions">
 <button id="inbox-claim">Claim</button>

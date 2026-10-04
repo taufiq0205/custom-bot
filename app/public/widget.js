@@ -12,6 +12,10 @@
   const root = el('section', {}, el('h2', {textContent: 'Chat with us'}));
   root.setAttribute('aria-label', 'Website chat');
   root.style.cssText = 'max-width:32rem;font-family:system-ui;overflow-wrap:anywhere';
+  const memoryPanel=el('section',{},el('h3',{textContent:'Customer memory'}));
+  memoryPanel.hidden=true;
+  const controls=el('script',{src:api+'/memory-controls.js'});
+  const controlsReady=new Promise((resolve,reject)=>{controls.onload=resolve;controls.onerror=()=>reject(new Error('Memory controls unavailable'));});root.append(controls);
   const notice = el('p'), log = el('ol'), status = el('p'), earlier = el('ul');
   const history = el('nav', {hidden: true}, el('h3', {textContent: 'Earlier conversations'}), earlier);
   history.setAttribute('aria-label', 'Earlier conversations');
@@ -22,8 +26,8 @@
   const send = el('button', {textContent: 'Send'});
   const human = el('button', {type: 'button', textContent: 'Talk to a person', hidden: true});
   const form = el('form', {}, el('label', {}, 'Message', input), send, human);
-  root.append(notice, log, form, status, history);
-  script.after(root);
+  root.append(notice, log, form, status, history, memoryPanel);
+  if(script.parentElement===document.head)document.body.append(root);else script.after(root);
   const load = () => {try {return JSON.parse(localStorage.getItem(key)) ?? {};} catch {return {};}};
   // Only identity changes (force) may replace a newer session another tab stored; other writes would resurrect a rotated token.
   const save = force => {try {if (force || [undefined, state.token].includes(load().token)) localStorage.setItem(key, JSON.stringify(state));} catch {}};
@@ -70,6 +74,15 @@
       const conversation = await call(`/conversations/${state.conversation}`);
       if (withList) list = await call('/conversations');
       render(conversation);
+      memoryPanel.hidden=!state.verified;
+      if(state.verified&&withList) {
+        await controlsReady;
+        let data;try {data=await call(`/conversations/${state.conversation}/memory`);}catch(error){memoryPanel.replaceChildren(el('p',{textContent:'Memory is unavailable; chat continues without personalization.'}));return;}
+        window.memoryControls(memoryPanel,data,async input=>{
+          try {await call(`/conversations/${state.conversation}/memory`,input);await refresh();status.textContent='Memory updated.';}
+          catch(error){status.textContent=error.message;}
+        },true);
+      }
       if (status.textContent === unavailable) status.textContent = '';
     } catch (error) {
       if (error.status === 401 || error.status === 404) return restart();
@@ -118,7 +131,7 @@
     clearTimeout(timer);
     state = stored;
     if (state.conversation) return refresh();
-    notice.textContent = ''; log.replaceChildren(); earlier.replaceChildren(); history.hidden = true;
+    memoryPanel.hidden=true;memoryPanel.replaceChildren();notice.textContent = ''; log.replaceChildren(); earlier.replaceChildren(); history.hidden = true;
   });
   human.addEventListener('click', async () => {
     human.disabled = true;

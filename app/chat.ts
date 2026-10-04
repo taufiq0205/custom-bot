@@ -2,9 +2,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { PoolClient } from 'pg';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { errors, importJWK, jwtVerify } from 'jose';
+import { changeMemory, readMemory } from './memory.js';
 import { origin as platform, pool } from './config.js';
 import { body, Failure, keys, message as submitted, uuid, verifier } from './memberships.js';
-const route=new RegExp(`^/api/chat/(${uuid})/(?:(identity|logout)|conversations(?:/(${uuid})(/messages|/handoff)?)?)$`);
+const route=new RegExp(`^/api/chat/(${uuid})/(?:(identity|logout)|conversations(?:/(${uuid})(/messages|/handoff|/memory)?)?)$`);
 const conversationColumns='c.id,c.control_state,c.configuration_version,p.document->\'generation\'->>\'mode\' AS mode';
 type Session={id:string,customer_id:string|null};
 const expired=()=>new Failure(401,'Chat session expired; start a new conversation');
@@ -161,6 +162,18 @@ export async function chat(req:IncomingMessage,res:ServerResponse,path:string,js
       const list=await client.query(`SELECT c.id,c.control_state,c.configuration_version,c.created_at FROM conversations c
         WHERE ${owned} ORDER BY c.created_at,c.id`,scope(business,session));
       return reply(200,list.rows);
+    }
+    if(id&&messages==='/memory'&&['GET','POST'].includes(req.method!)) {
+      await client.query('BEGIN');
+      const verified=await current(client,business,token!,'FOR SHARE');
+      if(!verified?.customer_id)throw new Failure(401,'Currently verified Customer required for memory');
+      await lock(client,business,verified,id);
+      if(req.method==='POST'&&input.action==='enable') {
+        const latest=(await client.query('SELECT id FROM conversations WHERE business_id=$1 AND session_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1',[business,verified.id])).rows[0];
+        if(latest?.id!==id)throw new Failure(409,'Opt in from the current linked conversation; older history is not eligible');
+      }
+      const result=req.method==='POST'?await changeMemory(client,business,verified.customer_id,id,input):await readMemory(client,business,verified.customer_id);
+      await client.query('COMMIT');return reply(200,result);
     }
     if(id&&!messages&&req.method==='GET')return reply(200,await conversation(client,business,session,id));
     if(!(id&&messages&&req.method==='POST'))throw new Failure(404,'Not found');
