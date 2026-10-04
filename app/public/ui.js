@@ -28,10 +28,10 @@ async function refresh() {
   } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;clearConfiguration();closeInbox();document.querySelector('#membership-panel').hidden=true;}
 }
 async function run(action) {
-  const buttons=[...document.querySelectorAll('button')];
+  const buttons=[...document.querySelectorAll('button')],disabled=new Map(buttons.map(button=>[button,button.disabled]));
   buttons.forEach(b=>b.disabled=true);
   try {await action();await refresh();} catch(error){status.textContent=error.message;}
-  finally {buttons.forEach(b=>b.disabled=false);}
+  finally {for(const button of document.querySelectorAll('button'))if(disabled.has(button))button.disabled=disabled.get(button);window.workflowEditor?.refreshActions();}
 }
 document.querySelector('#account').addEventListener('submit', event=>{
   event.preventDefault();
@@ -101,7 +101,7 @@ let config=null;
 const editor=document.querySelector('#config-text');
 const configPath=()=>`/api/businesses/${selectedBusiness.id}/configuration`;
 // Switching Business or account drops the previous draft, so its text can never be saved elsewhere.
-function clearConfiguration(){config=null;editor.value='';document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
+function clearConfiguration(){config=null;window.workflowEditor.clear();document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
 const discardEdits=()=>!config||editor.value===config.text||confirm('Discard your unsaved configuration edits?');
 function showConfiguration(validation) {
   document.querySelector('#config-state').textContent=`Draft revision ${config.revision} · published version ${config.published}`;
@@ -113,35 +113,42 @@ function showConfiguration(validation) {
 const conflict=latest=>new Error(`Another Owner changed the draft (now revision ${latest.revision}). Your text is kept here and was not saved. Copy it if needed, then select Reload draft to load the latest.`);
 async function loadConfiguration() {
   const data=await request(configPath());
-  config={revision:data.revision,text:data.text,published:data.published_version};
-  editor.value=data.text;
+  config={revision:data.revision,text:data.text,published:data.published_version,validation:data.validation};
+  window.workflowEditor.load(data);
   showConfiguration(data.validation);
 }
 const loaded=()=>{if(!config)throw new Error('Select Manage again to load this Business configuration.');};
 async function saveConfiguration() {
   loaded();
   const text=editor.value;
+  if(text===config.text)return config.validation;
   const data=await request(configPath(),{text,revision:config.revision}).catch(error=>{throw error.status===409?conflict(error.data.latest):error;});
-  config={...config,revision:data.revision,text};
+  config={...config,revision:data.revision,text,validation:data.validation};
+  window.workflowEditor.setValidation(data.validation);
   showConfiguration(data.validation);
   const {json_valid,errors,blockers}=data.validation;
   status_(!json_valid||errors.length?'Draft saved with errors; it cannot be published until they are fixed.':blockers.length?'Draft saved; it is incomplete and cannot be published yet.':'Draft saved.');
+  return data.validation;
 }
 const status_=message=>{status.textContent=message;};
 document.querySelector('#config-save').addEventListener('click',()=>run(saveConfiguration));
 document.querySelector('#config-reload').addEventListener('click',()=>run(async()=>{if(!discardEdits())return;config=null;await loadConfiguration();status_('Latest draft loaded.');}));
 document.querySelector('#config-publish').addEventListener('click',()=>run(async()=>{
   loaded();
-  if(editor.value!==config.text)await saveConfiguration();
+  const validation=editor.value!==config.text?await saveConfiguration():config.validation;
+  if(!validation?.json_valid||validation.errors.length||validation.blockers.length){showConfiguration(validation);throw new Error('Not published: fix the listed problems first.');}
   const data=await request(configPath()+'/publish',{revision:config.revision}).catch(error=>{
     if(error.status===409)throw conflict(error.data.latest);
     if(error.status===422){showConfiguration(error.data.validation);throw new Error('Not published: fix the listed problems first.');}
     throw error;
   });
-  config={...config,revision:data.revision,published:data.version};
+  config={...config,revision:data.revision,published:data.version,validation:{json_valid:true,errors:[],blockers:[]}};
+  window.workflowEditor.setValidation(config.validation);
   showConfiguration({errors:[],blockers:[]});
   status_(`Published version ${data.version}. New conversations use it; existing conversations keep their version.`);
 }));
+
+window.workflowEditor.setServices({run,save:saveConfiguration,loadPublished:()=>request(`${configPath()}/versions/${config.published}`)});
 
 // Shared inbox. Polling refreshes the list and open conversation but never touches reply drafts, and never adopts a newer revision:
 // actions carry the revision the Operator last opened or acted on, so the server rejects them after someone else changed control.

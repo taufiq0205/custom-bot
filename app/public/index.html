@@ -4,6 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Custom Bot — Operator</title>
 <link rel="stylesheet" href="/style.css">
+<script src="/workflow-editor.js" defer></script>
 <script src="/ui.js" defer>
 </script>
 <body>
@@ -62,13 +63,52 @@
 <button>Approve origin</button>
 </form>
 <section id="configuration-panel">
-<h3>Configuration</h3>
-<p>Edit the JSON draft. Saving keeps invalid text; only a complete, valid draft can be published. New conversations use the latest published version.</p>
-<p id="config-state"></p>
-<label>Configuration JSON <textarea id="config-text" rows="18" spellcheck="false" autocomplete="off"></textarea></label>
-<button id="config-save">Save draft</button>
-<button id="config-publish">Publish</button>
-<button id="config-reload">Reload draft</button>
+<div class="configuration-heading"><div><h3>Configuration</h3><p>Edit the same draft on the workflow canvas or in JSON. Invalid text is preserved until repaired or discarded.</p></div><p id="config-state"></p></div>
+<div id="workflow-editor" class="workflow-editor" hidden>
+<div class="workflow-toolbar">
+<div class="workflow-tabs" role="group" aria-label="Configuration view">
+<button id="workflow-tab" type="button" aria-pressed="true" data-focus-key="tab:workflow">Workflow</button>
+<button id="json-tab" type="button" aria-pressed="false" data-focus-key="tab:json">JSON</button>
+</div>
+<span class="toolbar-divider"></span>
+<button id="add-step" type="button" aria-keyshortcuts="/">＋ Add step <kbd>/</kbd></button>
+<button id="workflow-tidy" type="button">Tidy</button>
+<button id="workflow-fit" type="button" aria-label="Fit workflow to view">Fit</button>
+<button id="workflow-zoom-out" type="button" aria-label="Zoom out">−</button>
+<output id="workflow-zoom" aria-live="polite">100%</output>
+<button id="workflow-zoom-in" type="button" aria-label="Zoom in">＋</button>
+<button id="disconnect-edge" type="button" hidden>Disconnect selected link</button>
+<label class="motion-option"><input id="reduce-workflow-motion" type="checkbox"> Reduce motion</label>
+</div>
+<section id="workflow-view" class="workflow-view" aria-label="Workflow editor">
+<div id="workflow-canvas" role="region" aria-label="Workflow canvas" tabindex="0">
+<div id="workflow-world"><svg id="workflow-wires" aria-hidden="true"></svg><div id="workflow-nodes"></div></div>
+<svg id="workflow-minimap" viewBox="0 0 184 112" role="img" aria-label="Workflow minimap"><title>Workflow minimap. Click or drag to pan.</title></svg>
+<p class="canvas-help">Drag to move · drag a connection port to another step · scroll to pan · Ctrl/⌘ scroll to zoom</p>
+</div>
+<aside id="config-inspector" class="config-inspector" aria-label="Step settings" hidden>
+<div class="inspector-heading"><div><p id="inspector-kind"></p><h4 id="inspector-name"></h4></div><button id="close-inspector" type="button" aria-label="Close step settings">×</button></div>
+<label for="inspector-step-id">Step ID</label><input id="inspector-step-id" readonly>
+<div id="inspector-entry"></div>
+<div id="inspector-fields"></div>
+<div id="inspector-connections"></div>
+<button id="delete-step" class="danger" type="button">Delete step…</button>
+</aside>
+</section>
+<section id="json-view" class="json-view" hidden>
+<nav id="json-outline" aria-label="JSON sections"></nav>
+<div class="json-editor-wrap">
+<label for="config-text">Configuration JSON</label>
+<div class="json-editor"><pre id="json-gutter" aria-hidden="true">1</pre><textarea id="config-text" rows="20" spellcheck="false" autocomplete="off" wrap="off"></textarea></div>
+<div id="json-error-box" class="json-error-box" role="alert" hidden><ul id="json-errors"></ul><div><button id="json-go-error" type="button">Go to error</button><button id="config-discard-invalid" type="button">Discard invalid text</button></div></div>
+</div>
+</section>
+<div class="configuration-actions">
+<button id="config-save" type="button">Save draft</button>
+<button id="config-publish" type="button">Publish</button>
+<button id="config-reload" type="button">Reload draft</button>
+<span class="configuration-actions-help">Only complete drafts can be published.</span>
+</div>
 <ul id="config-issues"></ul>
 </section>
 </section>
@@ -94,5 +134,17 @@
 <button id="signout">Sign out</button>
 </section>
 </main>
+<dialog id="step-picker" aria-labelledby="step-picker-title">
+<h2 id="step-picker-title">Add workflow step</h2>
+<label for="step-picker-search">Search step types</label><input id="step-picker-search" autocomplete="off" placeholder="Search step types…">
+<div id="step-picker-options" class="step-picker-options"></div>
+<button class="close-dialog" type="button">Cancel</button>
+</dialog>
+<dialog id="step-delete-dialog" aria-labelledby="step-delete-title">
+<h2 id="step-delete-title">Delete step</h2>
+<p id="step-delete-summary"></p><ul id="step-delete-links"></ul>
+<p>The listed incoming links and start step will be cleared; outgoing links will be removed with the step. Nothing will be rerouted.</p>
+<button class="close-dialog" type="button">Cancel</button><button id="confirm-step-delete" class="danger" type="button">Delete step</button>
+</dialog>
 </body>
 </html>

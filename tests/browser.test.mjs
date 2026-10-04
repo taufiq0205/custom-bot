@@ -2,6 +2,35 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { base, otp } from './helpers.mjs';
+
+const visualConfiguration=()=>({
+ schema_version:1,
+ generation:{mode:'simulation'},
+ decision:{engine:'jev',model:'jev-small'},
+ sources:[{id:'policies',priority:1},{id:'catalogue',priority:2}],
+ agents:[
+  {id:'router',name:'Router',instructions:'Classify the request.',sources:['policies'],actions:[],model:{provider:'qwen',name:'qwen3.7-plus',temperature:0,max_tokens:256}},
+  {id:'support',name:'Order support — “ünïcode”',instructions:'Answer from assigned knowledge.\nUse authorized order lookup.',sources:['policies','catalogue'],actions:['order_status'],model:{provider:'deepseek',name:'deepseek-flash',temperature:0.4,max_tokens:1024}}
+ ],
+ actions:[{id:'order_status',method:'GET',url:'https://orders.example.com/status?format=json',
+  input_schema:{type:'object',properties:{order_id:{type:'string',description:'Order number'}},required:['order_id']},
+  result_schema:{type:'object',properties:{status:{type:'string'},items:{type:'array',items:{type:'object',properties:{sku:{type:'string'},quantity:{type:'integer'}},required:['sku']}},paid:{type:'boolean'},total:{type:'number'}},required:['status']},
+  credential:'order_api',authorization:'order_owner',timeout_ms:15000}],
+ workflow:{entry:'retrieve',steps:[
+  {id:'retrieve',type:'retrieval',sources:['policies','catalogue'],position:{x:0,y:160}},
+  {id:'classify',type:'agent',agent:'router',final:false,position:{x:280.5,y:-40.25}},
+  {id:'route',type:'condition',field:'intent',equals:'order_status',position:{x:560,y:160}},
+  {id:'lookup',type:'http',action:'order_status',position:{x:840,y:0}},
+  {id:'reply',type:'agent',agent:'support',final:true,position:{x:1120,y:200}},
+  {id:'handoff',type:'handoff',position:{x:1400,y:440}}
+ ],connections:[
+  {from:'retrieve',output:'next',to:'classify'},
+  {from:'classify',output:'next',to:'route'},{from:'classify',output:'unsupported',to:'handoff'},
+  {from:'route',output:'yes',to:'lookup'},{from:'route',output:'fallback',to:'reply'},
+  {from:'lookup',output:'success',to:'reply'},{from:'lookup',output:'failure',to:'handoff'},
+  {from:'reply',output:'unsupported',to:'handoff'}
+ ]}
+});
 test('browser: register, verify, sign in, create Owner Business, recover, sign out', async()=>{
  const browser=await chromium.launch();
  const page=await browser.newPage({viewport:{width:390,height:844}});
@@ -248,7 +277,7 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
  try {
   const page=await signIn(owner);
   const editor=page.getByLabel('Configuration JSON');
-  const open=async()=>{await page.getByRole('button',{name:'Manage Browser Config',exact:true}).click();await page.getByText(/Draft revision \d+ · published version \d+/).waitFor();};
+  const open=async()=>{await page.getByRole('button',{name:'Manage Browser Config',exact:true}).click();await page.getByText(/Draft revision \d+ · published version \d+/).waitFor();await page.getByRole('button',{name:'JSON',exact:true}).click();};
   await open();
   assert.equal(JSON.parse(await editor.inputValue()).generation.mode,'simulation');
   const invalid='{\n  "schema_version": 1,\n  "agents": [,]\n}';
@@ -256,6 +285,7 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   await page.getByRole('button',{name:'Save draft',exact:true}).click();
   await page.getByText('Draft saved with errors; it cannot be published until they are fixed.',{exact:true}).waitFor();
   await page.getByText(/^Error — Line 3, column 14:/).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Publish',exact:true}).isDisabled(),true);
   // Another Owner action refreshes the page data but never replaces the editor text.
   await editor.fill(invalid+' ');
   await page.getByLabel('Invite email').fill(`browser-config-${crypto.randomUUID()}@example.test`);
@@ -264,13 +294,13 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   assert.equal(await editor.inputValue(),invalid+' ');
   await page.reload();await open();
   assert.equal(await editor.inputValue(),invalid);
-  await page.getByRole('button',{name:'Publish',exact:true}).click();
-  await page.getByText('Not published: fix the listed problems first.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Publish',exact:true}).isDisabled(),true);
   // A structurally valid, incomplete draft lists located publication blockers.
   const doc=(await owner.request(path+'/versions/1')).data.document;
   await editor.fill(JSON.stringify({...doc,workflow:{...doc.workflow,entry:null}},null,2));
-  await page.getByRole('button',{name:'Publish',exact:true}).click();
-  await page.getByText('Not published: fix the listed problems first.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.getByText('Draft saved; it is incomplete and cannot be published yet.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Publish',exact:true}).isDisabled(),true);
   await page.getByText('Before publishing — /workflow/entry: Choose a start step',{exact:true}).waitFor();
   // Another Owner's save makes this page's revision stale: the save is rejected and the local text stays.
   const latest=(await owner.request(path)).data;
@@ -304,8 +334,9 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   await page.getByRole('button',{name:'Manage Browser Config Other'}).click();
   await page.waitForFunction(()=>document.querySelector('#membership-title').textContent.includes('Browser Config Other'));
   assert.equal(await editor.inputValue(),'');
-  await page.getByRole('button',{name:'Save draft',exact:true}).click();
-  await page.getByText('Select Manage again to load this Business configuration.',{exact:true}).waitFor();
+  await page.waitForFunction(()=>/fetch/i.test(document.querySelector('#status').textContent));
+  assert.equal(await page.locator('#workflow-editor').isHidden(),true);
+  assert.equal(await page.getByRole('button',{name:'Save draft',exact:true}).count(),0);
   const otherAfter=(await owner.request(otherPath)).data;
   assert.equal(otherAfter.text,otherBefore.text);assert.equal(otherAfter.revision,otherBefore.revision);
   await page.unroute(otherDraft);
@@ -319,6 +350,143 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   await supportPage.getByText('Browser Config — Support',{exact:true}).waitFor();
   assert.equal(await supportPage.getByRole('button',{name:'Manage Browser Config',exact:true}).count(),0);
   assert.equal(await supportPage.getByLabel('Configuration JSON').isVisible(),false);
+  assert.deepEqual(errors,[]);
+ } finally {await browser.close();}
+});
+test('browser: workflow and JSON edit the complete persisted configuration; invalid JSON stays until discarded',async()=>{
+ const {operator,compose,ready}=await import('./helpers.mjs');
+ const owner=await operator('browser-visual-owner');
+ const business=(await owner.request('/api/businesses',{name:'Browser Visual'})).data;
+ const path=`/api/businesses/${business.id}/configuration`;
+ const initial=(await owner.request(path)).data;
+ const original=visualConfiguration(),text=JSON.stringify(original,null,3);
+ const saved=await owner.request(path,{text,revision:initial.revision});
+ assert.equal(saved.status,200);assert.deepEqual(saved.data.validation,{json_valid:true,errors:[],blockers:[]});
+ const browser=await chromium.launch(),errors=[];
+ const page=await browser.newPage({viewport:{width:1440,height:980}});page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+ const open=async()=>{await page.getByRole('button',{name:'Manage Browser Visual',exact:true}).click();await page.getByRole('region',{name:'Workflow canvas'}).waitFor();};
+ try {
+  await page.goto(base);await page.getByLabel('Email',{exact:true}).fill(owner.email);await page.getByLabel('Password',{exact:true}).fill(owner.password);
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForTimeout(1000);assert.equal(await page.locator('#status').innerText(),'Signed in.',`status=${await page.locator('#status').innerText()} pageErrors=${errors.join('; ')}`);await page.getByLabel('Business name').waitFor();assert.deepEqual(errors,[]);await open();
+  const code=page.getByLabel('Configuration JSON');
+  assert.equal(await page.getByRole('button',{name:'Workflow',exact:true}).getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('[data-step-id="route"]').count(),1);
+  assert((await page.locator('#workflow-wires text').allTextContents()).includes('Else'));
+  await page.getByRole('button',{name:'Fit workflow to view'}).click();await page.locator('#workflow-canvas').scrollIntoViewIfNeeded();
+  const canvas=page.locator('#workflow-canvas'),canvasBox=await canvas.boundingBox(),camera=()=>page.locator('#workflow-world').evaluate(el=>el.style.transform),beforePan=await camera();
+  await page.mouse.move(canvasBox.x+canvasBox.width-18,canvasBox.y+canvasBox.height-18);await page.mouse.down();await page.mouse.move(canvasBox.x+canvasBox.width-58,canvasBox.y+canvasBox.height-48,{steps:4});await page.mouse.up();
+  assert.notEqual(await camera(),beforePan,'dragging blank canvas pans the workflow');
+  await page.getByRole('button',{name:'Fit workflow to view'}).click();
+  const port=page.getByRole('button',{name:'Connect classify Unsupported'}),handoff=page.locator('[data-step-id="handoff"]');await port.scrollIntoViewIfNeeded();await handoff.scrollIntoViewIfNeeded();
+  const portBox=await port.boundingBox(),handoffBox=await handoff.boundingBox();
+  await page.mouse.move(portBox.x+portBox.width/2,portBox.y+portBox.height/2);await page.mouse.down();
+  await page.mouse.move(handoffBox.x+handoffBox.width/2,handoffBox.y+handoffBox.height/2,{steps:6});
+  assert((await handoff.getAttribute('class')).includes('drop-target'),`source=${JSON.stringify(portBox)} target=${JSON.stringify(handoffBox)} pending=${await page.locator('.workflow-edge.pending').count()}`);
+  assert.equal(await page.locator('.workflow-edge.pending').count(),1);
+  await page.mouse.up();assert.equal(await page.locator('.workflow-edge.pending').count(),0);
+  const route=page.locator('[data-step-id="route"]');await route.focus();await route.press('ArrowRight');await route.press('Enter');await page.getByRole('complementary',{name:'Step settings'}).waitFor();
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  let edited=JSON.parse(await code.inputValue());
+  edited.workflow.steps.find(s=>s.id==='route').equals='order_delivery';
+  edited.workflow.connections.find(c=>c.from==='route'&&c.output==='fallback').to='handoff';
+  await code.fill(JSON.stringify(edited,null,2));await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.locator('[data-step-id="route"]').getByText('intent = order_delivery',{exact:true}).waitFor();
+  assert((await page.locator('#workflow-wires text').allTextContents()).includes('Else'));
+
+  // Drag a node: the live connection follows before the pointer is released.
+  const reply=page.locator('[data-step-id="reply"]'),box=await reply.boundingBox();
+  const edge=page.locator('[data-from="lookup"][data-output="success"].workflow-edge');
+  const before=await edge.getAttribute('d');
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2+45,box.y+box.height/2+30,{steps:5});
+  const during=await edge.getAttribute('d');assert.notEqual(during,before,'connected edge moves during drag');
+  await page.mouse.up();
+
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  edited=JSON.parse(await code.inputValue());
+  assert.deepEqual(edited.decision,original.decision);assert.deepEqual(edited.sources,original.sources);
+  assert.deepEqual(edited.agents,original.agents);assert.deepEqual(edited.actions,original.actions);
+  await code.fill('{}');assert.equal(await page.getByRole('button',{name:'Publish',exact:true}).isDisabled(),true);assert.deepEqual(errors,[]);
+  await code.fill(JSON.stringify(edited,null,2));edited=JSON.parse(await code.inputValue());
+  assert.equal(edited.workflow.steps.find(s=>s.id==='route').position.x,580);
+  assert.equal(edited.workflow.steps.find(s=>s.id==='route').equals,'order_delivery');
+  assert.equal(edited.workflow.connections.find(c=>c.from==='route'&&c.output==='fallback').to,'handoff');
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.getByText(/^Draft saved\./).waitFor();
+  await compose('restart','app');await ready();await page.reload();await open();
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  const restored=JSON.parse(await code.inputValue());assert.deepEqual(restored,edited);
+
+  // A visual edit rejected by schema validation keeps the exact text reachable in JSON for repair.
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();await page.locator('[data-step-id="lookup"]').click();
+  await page.getByLabel('HTTPS endpoint').fill('http://orders.example.com/status');
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.getByText('Draft saved with errors; it cannot be published until they are fixed.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'JSON',exact:true}).getAttribute('aria-pressed'),'true');
+  let invalidVisual=JSON.parse(await code.inputValue());assert.equal(invalidVisual.actions[0].url,'http://orders.example.com/status');
+  assert((await page.locator('#config-issues').innerText()).includes('/actions/0/url'));
+  await code.fill(text);await page.getByRole('button',{name:'Workflow',exact:true}).click();await page.getByRole('region',{name:'Workflow canvas'}).waitFor();
+
+  // The searchable picker, labelled branches, Tidy, zoom, and safe deletion use the same draft.
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.getByRole('button',{name:/Add step/}).click();
+  await page.getByLabel('Search step types').fill('human takeover');await page.keyboard.press('Enter');
+  const added=page.locator('[data-step-id^="handoff_"]').first();await added.waitFor();
+  await page.locator('[data-step-id="route"]').click();const branch=page.getByLabel('Else connection from route');await branch.focus();
+  assert.equal(await branch.evaluate(el=>document.activeElement===el),true,'connection control accepts keyboard focus');
+  assert.equal(await branch.inputValue(),'reply');await branch.press('ArrowDown');await branch.press('ArrowDown');await branch.press('Enter');
+  assert.equal(await branch.inputValue(),await added.getAttribute('data-step-id'),'keyboard selection connects a branch');
+  const zoom=page.locator('#workflow-zoom'),zoomBefore=await zoom.innerText();
+  await page.getByRole('button',{name:'Zoom in',exact:true}).click();
+  assert.notEqual(await zoom.innerText(),zoomBefore,'Zoom in changes the displayed canvas scale');
+  await page.getByRole('button',{name:'Tidy',exact:true}).click();
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  const arranged=JSON.parse(await code.inputValue()),positions=new Map(arranged.workflow.steps.map(step=>[step.id,step.position]));
+  for(const edge of arranged.workflow.connections.filter(edge=>edge.to))
+   assert(positions.get(edge.to).x>positions.get(edge.from).x,`Tidy places ${edge.to} to the right of ${edge.from}`);
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.getByRole('region',{name:'Workflow canvas'}).waitFor();
+  assert.equal(await page.getByRole('img',{name:'Workflow minimap'}).isVisible(),true);
+  const beforeMap=await camera();await page.locator('#workflow-minimap').click({position:{x:150,y:80}});assert.notEqual(await camera(),beforeMap,'minimap click pans the canvas');
+  await added.focus();await added.press('Delete');
+  await page.getByRole('dialog',{name:/Delete step/}).waitFor();
+  await page.getByText(/route · Else → handoff_/).waitFor();
+  await page.getByRole('button',{name:'Delete step',exact:true}).click();
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  edited=JSON.parse(await code.inputValue());
+  assert.equal(edited.workflow.connections.find(c=>c.from==='route'&&c.output==='fallback').to,null);
+  assert((await page.locator('#config-issues').innerText()).includes('has no target'));
+
+  // Settings remain usable on a narrow screen; explicit and system reduced motion both apply.
+  await page.getByRole('checkbox',{name:'Reduce motion'}).check();
+  assert.equal(await page.locator('#workflow-editor').evaluate(el=>el.classList.contains('reduce-motion')),true);
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('[data-step-id="route"]').click();
+  await page.getByLabel('Field',{exact:true}).waitFor();
+  const inspector=await page.locator('#config-inspector').evaluate(el=>getComputedStyle(el).bottom);assert.notEqual(inspector,'auto');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await page.locator('#workflow-editor').evaluate(el=>getComputedStyle(el).transitionDuration.split(',')[0].trim()),'0s');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+
+  // Saved malformed text survives restart and blocks the visual switch; only the explicit discard restores a published version.
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  const invalid='{ broken';await code.fill(invalid);await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.getByText('Draft saved with errors; it cannot be published until they are fixed.',{exact:true}).waitFor();
+  await page.reload();await page.getByRole('button',{name:'Manage Browser Visual',exact:true}).click();await code.waitFor();assert.equal(await code.inputValue(),invalid);
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'Invalid JSON or schema. The text stays in JSON'}).waitFor();
+  assert.equal(await code.inputValue(),invalid);
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Discard invalid text',exact:true}).click();
+  await page.getByRole('region',{name:'Workflow canvas'}).waitFor();
+
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
+  const invalidSchema=JSON.stringify({...original,unsupported:true},null,2);await code.fill(invalidSchema);
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'Invalid JSON or schema. The text stays in JSON'}).waitFor();
+  assert.equal(await code.inputValue(),invalidSchema);assert.equal(await page.getByRole('button',{name:'Publish',exact:true}).isDisabled(),true);
+  assert(await page.locator('#config-issues').innerText().then(t=>t.includes('/unsupported')));
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Discard invalid text',exact:true}).click();
+  await page.getByRole('region',{name:'Workflow canvas'}).waitFor();
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
 });
