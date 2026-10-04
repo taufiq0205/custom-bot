@@ -279,12 +279,17 @@ test('Knowledge versions: only complete versions activate; failed, interrupted o
   assert.deepEqual(await ask(),['Gift wrapping is free.']);
   assert.equal((await customer.read()).configuration_version,version);
 
-  // An older candidate that finishes after a newer one never replaces it.
-  await upload(b,'gifts','late.txt',text('[hold 6s]\nGift wrapping costs 9 dollars.'));
-  for(let i=0;i<40&&(await sources(b))[0].latest.state!=='running';i++)await wait(250);
-  await upload(b,'gifts','current.txt',text('Gift wrapping costs 2 dollars.'));
-  await active(b,'gifts','current.txt');
-  await wait(7000);
+  // An older candidate that finishes after a newer one never replaces it. A second, independent worker ingests the newer upload
+  // while the first still holds the older one.
+  const second=compose('run','-d','--no-deps','worker').trim();
+  try {
+    await upload(b,'gifts','late.txt',text('[hold 6s]\nGift wrapping costs 9 dollars.'));
+    for(let i=0;i<40&&(await sources(b))[0].latest.state!=='running';i++)await wait(250);
+    await upload(b,'gifts','current.txt',text('Gift wrapping costs 2 dollars.'));
+    await active(b,'gifts','current.txt');
+    assert.equal(sql(`SELECT state FROM source_versions WHERE business_id='${b.id}' AND document='late.txt'`),'running','the older upload is still held');
+    await wait(7000);
+  } finally {execFileSync('docker',['rm','-f',second],{stdio:'ignore'});}
   source=await ingested(b,'gifts');
   assert.deepEqual([source.active.document,source.latest.document,source.warning],['current.txt','current.txt',null]);
   assert.equal(sql(`SELECT state FROM source_versions WHERE business_id='${b.id}' AND document='late.txt'`),'superseded');

@@ -43,7 +43,9 @@ export async function knowledge(req:IncomingMessage,path:string,user:{id:string}
     let result,status=200;
     if(upload) {
       await client.query('INSERT INTO knowledge_sources(id,business_id,ref) VALUES($1,$2,$3) ON CONFLICT(business_id,ref) WHERE deleted_at IS NULL DO NOTHING',[randomUUID(),business,ref]);
-      const source=(await client.query('SELECT id FROM knowledge_sources WHERE business_id=$1 AND ref=$2 AND deleted_at IS NULL FOR UPDATE',[business,ref])).rows[0].id;
+      const source=(await client.query('SELECT id FROM knowledge_sources WHERE business_id=$1 AND ref=$2 AND deleted_at IS NULL FOR UPDATE',[business,ref])).rows[0]?.id;
+      // Deleted by a concurrent request between the insert and the lock.
+      if(!source)throw new Failure(409,'The source was deleted meanwhile; nothing was uploaded. Upload again.');
       const version=randomUUID();
       await client.query('INSERT INTO source_versions(id,business_id,source_id,document,format,size,content) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [version,business,source,upload.document,upload.format,upload.content.length,upload.content]);

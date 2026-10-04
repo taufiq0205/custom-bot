@@ -18,12 +18,14 @@ async function current(client:PoolClient,business:string,token:string,lock='') {
 const owned='c.business_id=$1 AND (c.customer_id=$2 OR ($2::uuid IS NULL AND c.customer_id IS NULL AND c.session_id=$3))';
 const scope=(business:string,session:Session)=>[business,session.customer_id,session.id];
 async function conversation(client:PoolClient,business:string,session:Session,id:string) {
-  const found=await client.query(`SELECT ${conversationColumns} FROM conversations c JOIN published_configurations p ON p.business_id=c.business_id AND p.version=c.configuration_version
-    WHERE ${owned} AND c.id=$4`,[...scope(business,session),id]);
-  if(!found.rowCount)throw new Failure(404,'Conversation not found');
+  // Messages first: a turn's outcome and its control change commit together, so a settled message guarantees the later read
+  // shows that control state (the reverse order could pair a failed turn with the state from before it).
   // Operator identities and submission IDs stay internal.
   const messages=await client.query(`SELECT id,author,text,simulated,CASE WHEN author='customer' THEN client_submission_id END AS client_submission_id,reply_to,turn_state,citations,created_at FROM messages
     WHERE business_id=$1 AND conversation_id=$2 ORDER BY seq`,[business,id]);
+  const found=await client.query(`SELECT ${conversationColumns} FROM conversations c JOIN published_configurations p ON p.business_id=c.business_id AND p.version=c.configuration_version
+    WHERE ${owned} AND c.id=$4`,[...scope(business,session),id]);
+  if(!found.rowCount)throw new Failure(404,'Conversation not found');
   return {...found.rows[0],messages:messages.rows};
 }
 async function open(client:PoolClient,business:string,customer?:{id:string,kid:string,exp:number}) {
