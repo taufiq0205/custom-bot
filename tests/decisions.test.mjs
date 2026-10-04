@@ -71,6 +71,60 @@ test('browser: an Owner allows and withdraws Jev decisions next to its key and e
   } finally {await browser.close();}
 });
 
+test('browser: the visual editor round-trips decision steps: question, choices, threshold and a connection per choice',async()=>{
+  const b=await decisionBusiness('decisions-editor');
+  const key=`editor-${crypto.randomUUID()}`,path=`/api/businesses/${b.id}/configuration`;
+  const original=routed(key);
+  const draft=(await owner.request(path)).data;
+  assert.equal((await owner.request(path,{text:JSON.stringify(original),revision:draft.revision})).status,200);
+  const browser=await chromium.launch();
+  try {
+    const page=await (await browser.newContext({viewport:{width:1440,height:980}})).newPage();
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(base);
+    await page.getByLabel('Email',{exact:true}).fill(owner.email);
+    await page.getByLabel('Password',{exact:true}).fill(owner.password);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await page.getByRole('button',{name:'Manage decisions-editor Business',exact:true}).click();
+    await page.getByRole('region',{name:'Workflow canvas'}).waitFor();
+    const node=page.locator('[data-step-id="triage"]');
+    await node.getByText('Choices · refund, order_status',{exact:true}).waitFor();
+    for(const output of ['refund','order_status','Uncertain','Failure'])await page.getByRole('button',{name:`Connect triage ${output}`,exact:true}).waitFor();
+    await node.click();
+    assert.equal(await page.getByLabel('Question',{exact:true}).inputValue(),`fixture-key:${key} What does the Customer want?`);
+    const choices=page.getByLabel('Choices (one per line, name: description)');
+    assert.equal(await choices.inputValue(),'refund: A refund, return or replacement\norder_status: Where an order is or when it arrives');
+    assert.equal(await page.getByLabel('Minimum probability of the chosen option').inputValue(),'0.6');
+    await page.getByText('Engine: jev/jev-latest. Only the choice name picks the route; it never writes the reply or authorizes an action.',{exact:true}).waitFor();
+    // A new choice gets its own connection; the threshold edits in place.
+    await choices.fill('refund: A refund, return or replacement\norder_status: Where an order is or when it arrives\nexchange: Swapping for another product');
+    await choices.press('Tab');
+    await page.getByLabel('exchange connection from triage').selectOption('support');
+    const threshold=page.getByLabel('Minimum probability of the chosen option');
+    await threshold.fill('0.75');await threshold.press('Tab');
+    await page.getByRole('button',{name:'JSON',exact:true}).click();
+    const edited=JSON.parse(await page.getByLabel('Configuration JSON').inputValue());
+    const expected=structuredClone(original);
+    Object.assign(expected.workflow.steps.find(s=>s.id==='triage'),{choices:{...CHOICES,exchange:'Swapping for another product'},min_probability:0.75});
+    expected.workflow.connections.push({from:'triage',output:'exchange',to:'support'});
+    assert.deepEqual(edited,expected);
+    await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.getByText(/^Draft saved\./).waitFor();
+    const saved=(await owner.request(path)).data;
+    assert.deepEqual([JSON.parse(saved.text),saved.validation.errors,saved.validation.blockers],[expected,[],[]]);
+    // The picker adds a decision step with editable defaults and an unconnected output per choice and safe route.
+    await page.getByRole('button',{name:'Workflow',exact:true}).click();
+    await page.getByRole('button',{name:/Add step/}).click();
+    await page.getByLabel('Search step types').fill('decision');await page.keyboard.press('Enter');
+    await page.locator('[data-step-id="decision_1"]').waitFor();
+    await page.getByRole('button',{name:'JSON',exact:true}).click();
+    const added=JSON.parse(await page.getByLabel('Configuration JSON').inputValue());
+    const {position,...step}=added.workflow.steps.find(s=>s.id==='decision_1');
+    assert.deepEqual(step,{id:'decision_1',type:'decision',question:'What does the Customer want?',choices:{refund:'A refund, return or replacement',other:'Anything else'},min_probability:0.6});
+    assert.deepEqual(added.workflow.connections.filter(c=>c.from==='decision_1').map(c=>[c.output,c.to]),[['refund',null],['other',null],['uncertain',null],['failure',null]]);
+    assert.deepEqual(errors,[]);
+  } finally {await browser.close();}
+});
+
 test('Decisions: a permitted Jev choice routes the workflow and never supplies text, context or authorization',async()=>{
   const b=await decisionBusiness('decisions-route');
   const key=`route-${crypto.randomUUID()}`;

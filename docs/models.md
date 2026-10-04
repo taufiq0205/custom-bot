@@ -5,7 +5,7 @@ The platform uses three kinds of model, each for a different job. Each can be se
 | Job | What it does | Model and how it runs | Status |
 | --- | --- | --- | --- |
 | **Generation** | Writes the Customer reply, and later extracts permitted memory | DeepSeek through its API, with one authorized fallback attempt on Qwen | Planned in [#28](https://github.com/taufiq0205/custom-bot/issues/28). Today a configuration with `generation.mode: "simulation"` gives labelled simulated replies. Connected agents answer only through the test fixture. |
-| **Typed decisions** | Gives structured answers such as a choice, a score or a yes/no, for workflow routing. Never Customer text or authorization. | Jev through the TypeSafe API. Laya or Von locally as alternatives. | Planned in [#29](https://github.com/taufiq0205/custom-bot/issues/29) (Jev) and [#30](https://github.com/taufiq0205/custom-bot/issues/30) (Laya/Von) |
+| **Typed decisions** | Gives structured answers such as a choice, a score or a yes/no, for workflow routing. Never Customer text or authorization. | Jev through the TypeSafe API. Laya or Von locally as alternatives. | Jev built ([#29](https://github.com/taufiq0205/custom-bot/issues/29)); Laya/Von planned in [#30](https://github.com/taufiq0205/custom-bot/issues/30) |
 | **Retrieval embeddings** | Finds the document passages relevant to a Customer's message | `BAAI/bge-small-en-v1.5`, run locally in the worker on CPU | Built (#21). **Optional:** it is installed with one command. |
 
 **Retrieval needs embeddings, and neither DeepSeek nor TypeSafe provides them.** The provider research (`research/PROVIDER-INTEGRATIONS.md`) found no supported embedding endpoint in the DeepSeek or TypeSafe APIs, or in Laya and Von. The specification also forbids silently falling back to a cloud embedding. Document knowledge therefore needs the local model. Generation and decisions can use API keys alone.
@@ -62,11 +62,13 @@ Planned in [#28](https://github.com/taufiq0205/custom-bot/issues/28); nothing be
 
 ## Typed decisions with a Jev API key (#29)
 
-Planned in [#29](https://github.com/taufiq0205/custom-bot/issues/29).
-- **Key:** server-side `TYPESAFE_API_KEY`.
-- **Endpoint:** `POST https://api.typesafe.ai/v1/systemone`. The request carries `model`, `state` and named `questions` (`choice`, `score` or `noul`).
-- **Configuration:** `decision: {engine: "jev", model}`, which the configuration already accepts.
-- **Validation:** decisions only route the workflow, and every answer is validated (names, shapes, thresholds) before it is used.
+Built in [#29](https://github.com/taufiq0205/custom-bot/issues/29); the README's Decisions section has the details.
+- **Key:** `TYPESAFE_API_KEY` in `.env`, passed to the worker only. Real calls also need `compose.connected.yaml`.
+- **Endpoint:** `POST https://api.typesafe.ai/v1/systemone`, with `model` (default `jev-latest`, which served `jev-1.13.0` on 2026-10-05), `state` and two questions: the step's `choice` and an English-language `noul`.
+- **Configuration:** `decision: {engine: "jev", model?}` plus `decision` steps (`question`, `choices`, `min_probability`).
+- **Permission:** each Business allows `jev`/`decision` separately from generation.
+- **Validation:** decisions only route the workflow. Shape, choice name, probabilities, language and threshold are checked independently; anything else takes the step's `failure` route.
+- **Cost:** input tokens only, USD 0.042 per million for `jev-1.13.0` (TypeSafe's published price, not measured here).
 
 Laya and Von (#30) serve the same `/v1/systemone` shape locally, as optional containers with their own model downloads. Their confidences are not interchangeable with Jev's.
 

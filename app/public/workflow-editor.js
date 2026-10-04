@@ -2,11 +2,14 @@
 const $=selector=>document.querySelector(selector),
  root=$('#workflow-editor'),code=$('#config-text'),canvas=$('#workflow-canvas'),world=$('#workflow-world'),
  nodes=$('#workflow-nodes'),wires=$('#workflow-wires'),inspector=$('#config-inspector');
-const OUTPUTS={retrieval:['next'],condition:['yes','fallback'],http:['success','failure'],agent:s=>s.final?['unsupported']:['next','unsupported'],handoff:[]};
+// A decision routes on each declared choice, then on its two safe routes (the server rejects choices with those names).
+const ROUTES=['uncertain','failure'];
+const OUTPUTS={retrieval:['next'],condition:['yes','fallback'],http:['success','failure'],agent:s=>s.final?['unsupported']:['next','unsupported'],handoff:[],
+ decision:s=>[...Object.keys(s.choices&&typeof s.choices==='object'&&!Array.isArray(s.choices)?s.choices:{}).filter(c=>!ROUTES.includes(c)),...ROUTES]};
 // Step colours follow the validated prototype.
-const TYPES={retrieval:{label:'Knowledge',icon:'▤',color:'#0c7166',description:'Search assigned knowledge'},condition:{label:'Condition',icon:'⑂',color:'#8f5400',description:'Branch on a field'},http:{label:'API action',icon:'↗',color:'#3f47b5',description:'Read live business data'},agent:{label:'Agent',icon:'✦',color:'#6b39b8',description:'Generate a customer reply'},handoff:{label:'Human takeover',icon:'☏',color:'#bf2f4b',description:'Pause and send to support'}};
-const EDGE_KIND={next:'ok',yes:'ok',success:'ok',fallback:'alt',failure:'bad',unsupported:'bad'};
-const EDGE_TEXT={yes:'Yes',fallback:'Else',success:'Success',failure:'Failure',unsupported:'Unsupported'};
+const TYPES={retrieval:{label:'Knowledge',icon:'▤',color:'#0c7166',description:'Search assigned knowledge'},condition:{label:'Condition',icon:'⑂',color:'#8f5400',description:'Branch on a field'},http:{label:'API action',icon:'↗',color:'#3f47b5',description:'Read live business data'},agent:{label:'Agent',icon:'✦',color:'#6b39b8',description:'Generate a customer reply'},decision:{label:'Decision',icon:'◇',color:'#0b6aa2',description:'Route on a typed Jev choice'},handoff:{label:'Human takeover',icon:'☏',color:'#bf2f4b',description:'Pause and send to support'}};
+const EDGE_KIND={next:'ok',yes:'ok',success:'ok',fallback:'alt',failure:'bad',unsupported:'bad',uncertain:'alt'};
+const EDGE_TEXT={yes:'Yes',fallback:'Else',success:'Success',failure:'Failure',unsupported:'Unsupported',uncertain:'Uncertain'};
 const GRID=20,clone=value=>JSON.parse(JSON.stringify(value));
 let documentDraft=null,validation={json_valid:true,errors:[],blockers:[]},validatedText='',view='visual',selected=null,selectedEdge=null;
 let camera={x:0,y:0,k:1},live={},metrics={},pending=null,pickerContext=null,deleteId=null,services={run:fn=>fn(),save:async()=>validation,loadPublished:async()=>null};
@@ -17,7 +20,7 @@ const connectionOf=(doc,from,output)=>connections(doc).find(edge=>edge.from===fr
 const $status=message=>{const status=$('#status');if(status)status.textContent=message;};
 const stepType=step=>TYPES[step.type]?.label||step.type;
 const stepTitle=step=>step.type==='agent'?(documentDraft?.agents?.find(agent=>agent.id===step.agent)?.name||step.id):step.id.replace(/[_-]/g,' ').replace(/^./,c=>c.toUpperCase());
-const outputLabel=(step,key)=>key==='yes'?`If ${step.field} = ${String(step.equals)}`:key==='next'?'Next':key==='fallback'?'Else':key==='success'?'Success':key==='failure'?'Failure':key==='unsupported'?'Unsupported':key;
+const outputLabel=(step,key)=>key==='yes'?`If ${step.field} = ${String(step.equals)}`:key==='next'?'Next':key==='fallback'?'Else':key==='success'?'Success':key==='failure'?'Failure':key==='unsupported'?'Unsupported':key==='uncertain'?'Uncertain':key;
 const edgeKind=key=>EDGE_KIND[key]||'ok';
 const position=(id)=>live[id]||stepOf(documentDraft,id)?.position||{x:0,y:0};
 const svg=(name,attrs={})=>{const node=document.createElementNS('http://www.w3.org/2000/svg',name);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));return node;};
@@ -142,6 +145,20 @@ function renderInspector(){
    const instructions=el('textarea',{id:'agent-instructions',maxlength:20000,value:agent.instructions,dataset:{focusKey:'field:agent-instructions'}});instructions.rows=5;instructions.addEventListener('change',()=>edit(doc=>{const item=doc.agents.find(item=>item.id===step.agent);if(item)item.instructions=instructions.value;},'Agent instructions updated.'));
    fields.append(labeled('Agent name',name),labeled('Instructions',instructions));}
  }
+ if(step.type==='decision'){
+  const question=el('textarea',{id:'decision-question',maxlength:2000,value:step.question||'',dataset:{focusKey:'field:decision-question'}});question.rows=3;
+  question.addEventListener('change',()=>edit(doc=>{stepOf(doc,step.id).question=question.value;},'Decision question updated.'));
+  // One choice per line, "name: description"; changing the names adds or removes their connections.
+  const choices=el('textarea',{id:'decision-choices',value:Object.entries(step.choices||{}).map(([name,text])=>`${name}: ${text}`).join('\n'),dataset:{focusKey:'field:decision-choices'}});choices.rows=4;
+  choices.addEventListener('change',()=>edit(doc=>{const node=stepOf(doc,step.id);
+   node.choices=Object.fromEntries(choices.value.split('\n').filter(line=>line.trim()).map(line=>{const at=line.indexOf(':');return at<0?[line.trim(),'']:[line.slice(0,at).trim(),line.slice(at+1).trim()];}));
+   normalizedOutputs(doc,node);},'Decision choices updated.'));
+  const threshold=el('input',{id:'decision-threshold',type:'number',min:0,max:1,step:0.05,value:String(step.min_probability??''),dataset:{focusKey:'field:decision-threshold'}});
+  threshold.addEventListener('change',()=>edit(doc=>{stepOf(doc,step.id).min_probability=Number(threshold.value);},'Decision threshold updated.'));
+  const engine=documentDraft.decision;
+  fields.append(labeled('Question',question),labeled('Choices (one per line, name: description)',choices),labeled('Minimum probability of the chosen option',threshold),
+   el('p',{className:'inspector-note',text:`${engine?`Engine: ${engine.engine}/${engine.model||(engine.engine==='jev'?'jev-latest':'default')}.`:'No decision engine selected.'} Only the choice name picks the route; it never writes the reply or authorizes an action.`}));
+ }
  if(step.type==='handoff')fields.append(el('p',{className:'inspector-note',text:'Pauses automation and places the conversation in the support queue.'}));
  const links=$('#inspector-connections');links.replaceChildren(el('h5',{text:'Connections'}));
  for(const output of outputs(step)){
@@ -159,6 +176,7 @@ function nodeDetail(step){
  if(step.type==='condition')return `${step.field||'field'} = ${String(step.equals??'')}`;
  if(step.type==='http')return `GET · ${step.action||'action not selected'}`;
  if(step.type==='agent')return documentDraft.agents?.find(agent=>agent.id===step.agent)?.name||`Agent · ${step.agent||'not selected'}`;
+ if(step.type==='decision')return `Choices · ${Object.keys(step.choices||{}).join(', ')||'none'}`;
  return 'Pauses automation';
 }
 function nodeElement(step){
@@ -290,7 +308,10 @@ function addStep(type,context){
  if(type==='condition'){step.field='intent';step.equals='value';}
  if(type==='http')step.action=documentDraft.actions?.[0]?.id||'';
  if(type==='agent'){step.agent=documentDraft.agents?.[0]?.id||'';step.final=true;}
+ if(type==='decision'){step.question='What does the Customer want?';step.choices={refund:'A refund, return or replacement',other:'Anything else'};step.min_probability=0.6;}
  const next=clone(documentDraft);next.workflow.steps.push(step);
+ // Decision steps share one engine; Jev unless another is already selected.
+ if(type==='decision')next.decision??={engine:'jev'};
  for(const output of outputs(step))next.workflow.connections.push({from:id,output,to:null});
  if(context?.from){setConnection(next,context.from,context.output,id);const first=outputs(step)[0];if(context.carry&&first&&oldTarget)setConnection(next,id,first,oldTarget);}
  selected=id;selectedEdge=null;setLocalDocument(next,`${stepType(step)} step ${id} added.`);requestAnimationFrame(()=>{centerOn(id);ensureVisible(id);});
