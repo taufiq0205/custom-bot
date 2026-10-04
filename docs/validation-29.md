@@ -75,6 +75,8 @@ Refusal legs, each the same six messages in a fresh Business:
 | `decision.model: "jev-small"` (an unknown model) | failed, `status 400 api_usage_error`, 0.30–0.40 s, one attempt, no retry | failure → support; no DeepSeek call |
 | A worker started with an invalid key (the normal worker stopped) | failed, `status 401 authentication_error`, 0.29–0.38 s, one attempt, no retry | failure → support; no DeepSeek call |
 
+**Rerun on the final commit `ff49035`** (after the code review fixes), with the default model and with `jev-small`: every message took the same route as in the table above. The decision attempts took 0.32–0.50 s, the refusals were again `status 400 api_usage_error` with one attempt each, and the revoked permission again sent nothing. In this run the descaling-tablets agent replied instead of answering `unsupported`.
+
 A first try at the invalid-key leg left the normal worker running beside the invalid-key one, so the two workers split the turns. That try is not counted; the leg was rerun with the normal worker stopped.
 
 Direct API probes with synthetic text (2026-10-05), used to freeze the fixture shapes:
@@ -85,7 +87,8 @@ Direct API probes with synthetic text (2026-10-05), used to freeze the fixture s
 - an invalid key: `401 authentication_error`.
 
 What this establishes:
-- Real account and model access for `jev-latest` (`jev-1.13.0`). Real routing matched the intended route for all four English requests.
+- Real account and model access for `jev-latest` (`jev-1.13.0`). Jev chose the intended choice for the four clear English requests.
+- The real `uncertain` route was never taken. "hmm" went to `other` above the threshold rather than to `uncertain`. When a catch-all choice like `other` exists, it absorbs ambiguity, so `uncertain` is rarely reached. The demo seed and evaluation (#35, #36) should either drop the catch-all or label ambiguous cases with that in mind. Only the fixture tests prove the `uncertain` route.
 - Real language refusal, and real authentication and unknown-model refusals, take the failure route without retry or generation.
 - About 380 input tokens per decision, which is USD 0.000016 at TypeSafe's published USD 0.042 per million input tokens (not measured billing).
 - Decision attempts took 0.34–0.45 s.
