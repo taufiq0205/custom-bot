@@ -4,7 +4,8 @@ import { pool } from './config.js';
 import { body, Failure, keys, uuid } from './memberships.js';
 type Issue={path:string,message:string,line?:number,column?:number};
 type Check=(value:any,path:string)=>void;
-const ID=/^[A-Za-z][A-Za-z0-9_-]{0,63}$/, REF=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/, FIELD=/^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const ID=/^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+export const REF=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/, FIELD=/^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const MAX_TEXT=262144;
 // PostgreSQL text/jsonb cannot store these.
 const unstorable=/\u0000|\p{Cs}/u;
@@ -63,6 +64,13 @@ function scan(s:string) {
   };
   try {value();space();if(i<s.length)fail();} catch {return {syntax:i,duplicate};}
   return {syntax:undefined,duplicate};
+}
+// An https:// URL on a named public host. Not proof of a public address: the worker resolves and checks every attempt.
+export function publicHttps(v:unknown) {
+  let url:URL|undefined;try{url=new URL(v as string);}catch{}
+  const host=url?.hostname.replace(/\.$/,'')??'';
+  return typeof v==='string'&&v.length<=2000&&url&&url.protocol==='https:'&&!url.username&&!url.password&&!url.hash
+    &&!/^\[|^\d+\.\d+\.\d+\.\d+$|(^|\.)localhost$/i.test(host)&&host.includes('.')?url:undefined;
 }
 const at=(text:string,offset:number)=>{const before=text.slice(0,offset).split('\n');return {line:before.length,column:before.at(-1)!.length+1};};
 // Numbers PostgreSQL numeric cannot hold (or JSON.parse silently rounds to 0/Infinity) are replaced by this marker.
@@ -130,12 +138,7 @@ export function validate(text:string) {
   };
   const topSchema:Check=(v,p)=>{if(isObject(v)&&v.type!=='object')err(p+'/type','Top-level schema must be "object"');else schema(v,p);};
   // Read-only actions on public HTTPS hostnames; destination approval and DNS checks happen again at run time.
-  const destination:Check=(v,p)=>{
-    let url:URL|undefined;try{url=new URL(v);}catch{}
-    if(typeof v!=='string'||v.length>2000||!url||url.protocol!=='https:'||url.username||url.password||url.hash
-      ||/^\[|^\d+\.\d+\.\d+\.\d+$|(^|\.)localhost$/i.test(url.hostname.replace(/\.$/,''))||!url.hostname.replace(/\.$/,'').includes('.'))
-      err(p,'Must be an https:// URL on a public hostname, without credentials or fragment');
-  };
+  const destination:Check=(v,p)=>{if(!publicHttps(v))err(p,'Must be an https:// URL on a public hostname, without credentials or fragment');};
   const stepFields:Record<string,Record<string,Check>>={
     retrieval:{sources:list(ref(sources,'source'),1)},
     condition:{field:text_(64,FIELD),equals:(v,p)=>{if(!['string','boolean'].includes(typeof v)&&!(typeof v==='number'&&Number.isFinite(v)))err(p,'Must be text, a number or true/false');}},

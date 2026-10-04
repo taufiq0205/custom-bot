@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
+import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 export const base = process.env.APP_URL || 'http://localhost:3100';
 const mailBase = process.env.MAIL_URL || 'http://localhost:8025';
 // The suite shares one client IP, so Better Auth's per-IP limits can apply; wait out the public Retry-After once.
@@ -71,7 +72,7 @@ export async function operator(prefix) {
   assert.equal(login.status,200);
   return {...a,id:login.data.user.id,cookie:login.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')};
 }
-export const compose=(...args)=>execFileSync('docker',['compose','-f','compose.yaml','-f','compose.test.yaml',...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+export const compose=(...args)=>execFileSync('docker',['compose','-f','compose.yaml','-f','compose.test.yaml',...args],{encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:1<<28});
 export async function ready(){for(let i=0;i<60;i++){try{if((await fetch(base+'/health/ready')).ok)return;}catch{}await new Promise(r=>setTimeout(r,500));}throw new Error('Readiness timeout');}
 // Independent sockets hold request bodies incomplete until every request is connected.
 export async function together(operations) {
@@ -87,3 +88,89 @@ export async function together(operations) {
     req.once('socket',socket=>socket.once('connect',async()=>{if(++arrived===operations.length)release();await barrier;req.end(payload.slice(-1));}));
   })));
 }
+
+// Workflow harness: controlled fixture, Businesses with verified Customers and live action controls, published configurations.
+const fixture=process.env.FIXTURE_URL||'http://localhost:3199';
+export const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const control=(path,body)=>fetch(fixture+path,{method:'POST',body:JSON.stringify(body)}).then(r=>r.json());
+// Scripted fixture responses per key, consumed in order; calls() reads back exactly what the worker sent.
+export const script=(key,responses)=>control('/script',{key,responses});
+export const calls=key=>control('/log',{key});
+export const sql=query=>compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','-U','custom_bot','-d','custom_bot','-tAc',query).trim();
+export const reply=value=>({content:JSON.stringify(value)});
+// A business API response for the requesting verified Customer: the fixture copies the request's customer parameter into customer_id.
+export const owned=(json,extra={})=>({json,owner:'customer_id',...extra});
+// Every agent calls the fixture provider; its key travels in the instructions. HTTP keys travel in the action URL path.
+export const agent=key=>({id:key.split('.').at(-1),name:key,instructions:`fixture-key:${key} Help the Customer.`,model:{provider:'deepseek',name:'fixture'}});
+export const action=(id,key,extra={})=>({id,method:'GET',url:`https://orders.fixture.test/${key}/orders`,
+  input_schema:{type:'object',properties:{order_id:{type:'string',description:'your order number'}},required:['order_id']},
+  result_schema:{type:'object',properties:{status:{type:'string'}},required:['status']},
+  credential:'orders-key',authorization:'own-orders',timeout_ms:15000,...extra});
+export function config({agents=[],actions=[],steps,links,sources}) {
+  return {schema_version:1,generation:{mode:'connected'},...(sources?{sources}:{}),agents,actions,workflow:{entry:steps[0].id,
+    steps:steps.map((s,i)=>({position:{x:i*240,y:0},...s})),connections:links.map(([from,output,to])=>({from,output,to}))}};
+}
+export const handoff={id:'support',type:'handoff'};
+export const workflowSite='https://shop-workflow.example.test';
+const audience=new URL(base).origin;
+// A Business website backend: holds its private key and signs short-lived identity assertions for its own customer IDs.
+async function website(issuer) {
+  const {publicKey,privateKey}=await generateKeyPair('ES256');
+  return {publicJwk:await exportJWK(publicKey),sign:(business,sub)=>{const iat=Math.floor(Date.now()/1000);
+    return new SignJWT({iss:issuer,aud:audience,business_id:business,sub,iat,exp:iat+600,jti:crypto.randomUUID()}).setProtectedHeader({alg:'ES256',kid:'site'}).sign(privateKey);}};
+}
+// A Business whose website signs in Customers, with an orders credential (sent only to orders.fixture.test) and an ownership policy.
+export async function business(prefix,{secret=`secret-${crypto.randomUUID()}`,owner}={}) {
+  owner??=await operator(prefix);
+  const id=(await owner.request('/api/businesses',{name:`${prefix} Business`})).data.id;
+  const site=await website(workflowSite);
+  assert.equal((await owner.request(`/api/businesses/${id}/website-origins`,{origin:workflowSite,approved:true})).status,200);
+  assert.equal((await owner.request(`/api/businesses/${id}/customer-keys`,{kid:'site',issuer:workflowSite,public_key:site.publicJwk})).status,201);
+  assert.equal((await owner.request(`/api/businesses/${id}/credentials`,{ref:'orders-key',origin:'https://orders.fixture.test',header:'x-api-key',secret})).status,200);
+  assert.equal((await owner.request(`/api/businesses/${id}/authorization-policies`,{ref:'own-orders',customer_parameter:'customer',owner_field:'customer_id'})).status,200);
+  return {owner,id,site,secret,controls:path=>`/api/businesses/${id}/${path}`};
+}
+export async function publish(b,doc) {
+  const path=`/api/businesses/${b.id}/configuration`;
+  const draft=(await b.owner.request(path)).data;
+  const saved=await b.owner.request(path,{text:JSON.stringify(doc),revision:draft.revision});
+  assert.equal(saved.status,200);
+  assert.deepEqual([saved.data.validation.errors,saved.data.validation.blockers],[[],[]]);
+  const published=await b.owner.request(path+'/publish',{revision:saved.data.revision});
+  assert.equal(published.status,201,JSON.stringify(published.data));
+  return published.data.version;
+}
+const chat=token=>async(path,body)=>{
+  const response=await fetch(`${base}/api/chat/${path}`,{method:body===undefined?'GET':'POST',
+    headers:{origin:workflowSite,...(token?{authorization:`Bearer ${token}`}:{}),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+  return {status:response.status,data:await response.json()};
+};
+// A website chat signed in as `subject` (pass null to stay anonymous).
+export async function start(b,subject=`customer-${crypto.randomUUID()}`) {
+  let created=await chat()(`${b.id}/conversations`,{});
+  assert.equal(created.status,201);
+  if(subject) {
+    created=await chat(created.data.token)(`${b.id}/identity`,{assertion:await b.site.sign(b.id,subject)});
+    assert.equal(created.status,200);
+  }
+  const session={subject,token:created.data.token,request:chat(created.data.token),path:`${b.id}/conversations/${created.data.conversation.id}`,conversation:created.data.conversation};
+  let n=0;
+  session.send=async text=>{
+    const sent=await session.request(session.path+'/messages',{client_submission_id:`message-${++n}-${crypto.randomUUID()}`,text});
+    assert.equal(sent.status,202);
+    return sent.data.message;
+  };
+  session.read=async()=>(await session.request(session.path)).data;
+  // Waits until this message's turn ends (completed, failed or handed to support).
+  session.settle=async(message)=>{
+    for(let i=0;i<400;i++) {
+      const c=await session.read();
+      if(!['queued','running'].includes(c.messages.find(m=>m.id===message.id).turn_state))return c;
+      await wait(250);
+    }
+    throw new Error('Turn did not settle');
+  };
+  session.ask=async text=>{const message=await session.send(text);const c=await session.settle(message);return {message,conversation:c,replies:c.messages.filter(m=>m.reply_to===message.id)};};
+  return session;
+}
+export const attempts=job=>sql(`SELECT string_agg(a.kind||':'||a.step_id||':'||a.status||':'||coalesce(a.error,''),',' ORDER BY a.id) FROM execution_attempts a JOIN jobs j ON j.id=a.job_id WHERE j.message_id='${job}'`);

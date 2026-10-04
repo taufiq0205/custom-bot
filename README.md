@@ -1,12 +1,13 @@
 # Custom Bot
 
-Slices 1–7 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, human takeover through a shared support inbox, and bounded execution of the published workflow. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge, provider inference, action credentials and Customer authorization belong to later slices.
+Slices 1–8 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, human takeover through a shared support inbox, bounded execution of the published workflow, and authorized live order lookups through Owner-controlled read-only HTTPS actions. The archived configuration prototype remains an interaction reference. The visual workflow editor, knowledge and provider inference belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies; no cloud keys or model download is needed for this slice.
 
 ```sh
 cp .env.example .env
 # Replace BOTH secrets using separate outputs from: openssl rand -hex 32
+# Optionally set ACTION_CREDENTIAL_KEY the same way to store Business API credentials (see Actions).
 # Keep .env private; never commit it.
 docker compose up --build -d --wait
 ```
@@ -29,7 +30,7 @@ Repeat seed commands leave existing Businesses/Memberships unchanged. Seeds neve
 
 Owners select **Manage** beside their Business to invite a verified Operator as Owner or Support, change a current Member's role, revoke access, or cancel a pending invitation. Invitation tokens arrive only at the intended email; the recipient signs in with that verified account and pastes the token into **Accept invitation**. Invitations expire after seven days, are single-use, and are superseded by a new invitation to the same email. Existing active Memberships cannot be overwritten through invitation acceptance. Revocation cancels pending invitations to that Member; demotion/revocation also cancels grants issued by that Owner. A fresh authorized invitation can restore revoked access. Every privileged request rechecks the current Business Membership; authority in another Business cannot grant access. Revocation does not require account sign-out. Concurrent changes preserve at least one active Owner.
 
-Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration APIs are Owner-only (below); credentials and trace APIs remain later slices and return 404 for all roles.
+Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration and action-control APIs are Owner-only (below); trace APIs remain a later slice and return 404 for all roles.
 
 ## Configuration (JSON)
 
@@ -105,7 +106,7 @@ Each Customer message in an `automated` conversation is one turn. The worker run
 | --- | --- |
 | `retrieval` | Continues to `next`. Knowledge ingestion arrives with #21, so it finds no evidence yet. |
 | `condition` | `yes` when the structured context field strictly equals `equals` (`true` is not `1`, and `1` equals `1.0`), otherwise `fallback`. |
-| `http` | Takes the action's input properties from the context. If a required one is missing, the turn sends one clarification built from the property `description` ("To continue, please tell me your order number.") and ends. The next message starts a new turn. A result matching `result_schema` merges its declared top-level properties into the context and goes to `success`. Undeclared properties are dropped. Anything else goes to `failure`. |
+| `http` | Runs the action through the central action checks (see Actions). It takes the action's input properties from the context. If a required one is missing, the turn sends one clarification built from the property `description` ("To continue, please tell me your order number.") and ends. The next message starts a new turn. A result matching `result_schema` merges its declared top-level properties into the context and goes to `success`. Undeclared properties are dropped. Anything else goes to `failure`. |
 | `agent` | In `simulation` mode a final agent gives the labelled simulated reply, and other agents continue with no context. In `connected` mode the agent's model must reply with one JSON object. Intermediate agents return `{"outcome":"next","context":{…}}` (at most 20 flat text/number/boolean fields), which is never shown to the Customer. Final agents return `{"outcome":"reply","reply":"…"}`. Any agent can return `{"outcome":"unsupported"}`, which follows its `unsupported` output. Only the final agent's reply is delivered. Context reaches the model as data in a user message, never as instructions, and an agent cannot overwrite a field set by a verified HTTP result. If it tries, the turn fails. |
 | `handoff` | Completes the turn and queues the conversation for support (`workflow-handoff`). |
 
@@ -126,9 +127,32 @@ Before every external attempt, and again before accepting the result, the worker
 No transaction stays open during a call. A takeover, handoff or sign-out therefore stops all later steps and discards late results. A worker crash fails the turn visibly once the lease lapses, and nothing is replayed. Each attempt is recorded value-free (step, kind, target, status, error, timing) for the Owner traces in #27.
 
 Current limits of this slice:
-- **No business HTTP request leaves the platform.** Action credentials, Customer authorization and DNS/redirect destination checks arrive with #20. Until then an `http` step records a refused attempt and follows `failure`. The only exception is the test overlay's `*.fixture.test` hosts.
 - **Connected agents have no real provider before #28.** A connected agent is unavailable unless the test overlay's fixture provider is selected with model name `fixture`.
 - Consent, source and deletion revalidation join the same check with #21–#24.
+
+## Actions and order lookup
+
+An action is a read-only `GET` to a Business API, declared in the configuration (`credential` and `authorization` are references). The secrets and authorization rules live in **live controls**, which an Owner manages through the API only (no UI yet). Support Members and other Businesses get `404`.
+
+- `GET /api/businesses/:id/action-controls` lists credentials (`ref`, `origin`, `header`, `active`, `revision`, `updated_at`; never the secret), authorization policies and revoked action IDs.
+- `POST /api/businesses/:id/credentials` `{ "ref", "origin": "https://api.example.com", "header": "authorization" | "x-…", "secret" }` stores or rotates a credential. The credential is only ever sent to that exact origin, as that header. Posting again rotates it. `POST …/credentials/:ref/revoke` `{}` revokes it and erases its ciphertext.
+- `POST /api/businesses/:id/authorization-policies` `{ "ref", "customer_parameter", "owner_field" }` stores a policy, and `…/authorization-policies/:ref/revoke` `{}` revokes it.
+- `POST /api/businesses/:id/actions/:actionId` `{ "revoked": true | false }` revokes an action ID in every configuration version, including versions that existing conversations pinned.
+
+Credentials are encrypted with AES-256-GCM, bound to their Business and reference. The key is `ACTION_CREDENTIAL_KEY` (64 hex characters, `openssl rand -hex 32`), which the app and worker read from the environment. It is never stored in the database. Without it, credentials cannot be stored (`503`) or used. Keep it with your other secrets: losing it makes stored credentials unreadable, and they must be stored again.
+
+Explicit `http` steps and agent-requested actions take the same path. Before every attempt (retries included), the worker checks:
+- the action is not revoked;
+- the credential and policy are active in this Business;
+- the action URL's origin equals the credential's origin;
+- the conversation has a verified Customer. An anonymous Customer is asked to sign in, and no request is sent;
+- no input or URL query supplies the policy's `customer_parameter`.
+
+The worker then resolves the hostname and connects only to the vetted address. Any private, loopback, link-local or otherwise non-public address is refused, even for an approved hostname, and redirects are never followed. The platform adds the verified Customer's ID as `customer_parameter`. A result is accepted only if its `owner_field` equals that ID, whatever order number was asked for, and only then does it have to match `result_schema`. Results and replies are rechecked before they count: a result arriving after its action, credential or policy was revoked or changed is discarded and follows `failure`, and a reply built on such a result is not delivered. Denials, authentication/authorization failures and malformed results are not retried. Transient failures retry once within the turn's budgets.
+
+In connected mode an agent with permitted `actions` may answer `{"outcome":"action","action":"<id>","input":{…}}`. A missing required input asks the Customer for it. A success adds the declared result fields to the context and calls the agent again (counting toward the agent and HTTP budgets). Any failure or denial follows the agent's `unsupported` output. An action outside the agent's list is invalid output and fails the turn.
+
+Every accepted lookup is stored with only its declared fields and `observed_at`, for support context. Attempts record value-free denial reasons. No secret appears in configuration, API responses, prompts, attempt rows or logs.
 
 ## Human takeover and shared inbox
 
@@ -152,7 +176,7 @@ Operator inbox API (verified Operator session, same-origin):
 
 `revision` changes whenever control or the assignee changes. Customer messages and replies do not change it. A stale revision, or an action by anyone but the assignee, returns `409` and changes nothing. All checks run under the conversation lock at commit. The Operator UI keeps a rejected reply in its box. A retried `client_submission_id` returns the original reply (`200`) and never sends twice. A non-Member gets `404`. Customers see Operator replies as `operator` messages without Operator identities.
 
-Lookup results and Customer memory are not shown yet; they arrive with actions (#20) and memory (#22).
+The conversation detail also returns `lookups`: each completed authorized lookup's declared result fields with `observed_at`. The inbox shows them as historical observations, not current status. Customer memory arrives with #22.
 
 Public Operator APIs: Better Auth endpoints under `/api/auth` (sign-up/email, sign-in/email, sign-out, get-session, email-otp/send-verification-otp, email-otp/verify-email, email-otp/request-password-reset, email-otp/reset-password); `GET/POST /api/businesses`; `GET /api/businesses/:id`; `GET /health/ready`. Business creation accepts only `{ "name": "Example" }`; arbitrary ownership fields are rejected. Unauthorized Business selectors return 404.
 
@@ -168,6 +192,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. The test overlay also starts a controlled HTTPS `fixture` service (provider and business endpoint, `tests/fixture/`, test-only self-signed CA) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests. The test overlay also starts a controlled HTTPS `fixture` service (provider and business endpoint, `tests/fixture/`, test-only self-signed CA) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.
