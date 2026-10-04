@@ -110,7 +110,7 @@ test('Knowledge ingestion: readable PDF, DOCX, TXT and Markdown activate with th
   const t=await team();
   const b=await business('knowledge-ingest',{owner:t.owner});
   const readable=[
-    ['guide','guide.pdf','pdf',pdf(['Northwind returns guide','Refunds are paid within 14 days.\nExchanges are free.','']),2],
+    ['guide','guide.pdf','pdf',pdf(['Northwind returns guide','Refunds are paid within 14 days.\nExchanges are free.']),2],
     ['credit','credit.docx','docx',docx(['Gift cards never expire.','Store credit lasts two years.']),1],
     ['shipping','shipping.txt','txt',text('﻿Shipping takes 3 to 5 business days.\n\nExpress shipping arrives next day.'),1],
     ['warranty','warranty.markdown','md',text('# Warranty\n\nAll kettles carry a **two-year** warranty.'),1],
@@ -141,7 +141,9 @@ print(json.dumps({'tokens':[len(e.tokenizer.encode(r[0]).ids) for r in rows],'di
   assert.match(counted.encoding.runtime,/^onnxruntime [\d.]+ CPUExecutionProvider$/);
 
   const unreadable=[
-    ['scanned.pdf',pdf(['','','Only the cover has text']),/2 of 3 PDF pages have no extractable text \(scanned pages need OCR/],
+    ['scanned.pdf',pdf(['','','Only the cover has text']),/^2 of 3 PDF pages have no extractable text \(page 1, 2; scanned pages need OCR/],
+    // A single scanned page among text pages fails the whole file: nothing partly ingested is reported as success.
+    ['partly-scanned.pdf',pdf(['Refunds are paid within 14 days.','','Exchanges are free.']),/^1 of 3 PDF pages have no extractable text \(page 2;/],
     ['broken.pdf',text('%PDF-1.4\n1 0 obj truncated'),/the PDF could not be read/],
     ['fake.pdf',text('Plain text pretending to be a PDF'),/the file is not a PDF/],
     ['broken.docx',text('PK not really a zip'),/the DOCX could not be read/],
@@ -158,8 +160,8 @@ print(json.dumps({'tokens':[len(e.tokenizer.encode(r[0]).ids) for r in rows],'di
     assert.match(source.warning,/This source has no usable version\.$/,document);
   }
   // Oversized: refused before anything is stored.
-  const big=await upload(b,'big','big.txt',Buffer.alloc(20*1024*1024+1,'a'));
-  assert.deepEqual([big.status,big.data.error],[413,'Documents are limited to 20 MiB; nothing was uploaded']);
+  const big=await upload(b,'big','big.txt',Buffer.alloc(20_000_001,'a'));
+  assert.deepEqual([big.status,big.data.error],[413,'Documents are limited to 20 MB (20,000,000 bytes); nothing was uploaded']);
   assert.equal((await sources(b)).some(s=>s.ref==='big'),false);
   assert.equal(sql(`SELECT count(*) FROM source_versions WHERE business_id='${b.id}' AND document='big.txt'`),'0');
   // Invalid names and unsupported formats are refused up front.
@@ -254,6 +256,18 @@ test('Knowledge precedence: each conversation sees its pinned published prioriti
   assert.equal(delivered(second).length,0);
   assert.equal(second.conversation.control_state,'waiting-for-support');
   assert.equal((await b.owner.request(`/api/businesses/${b.id}/inbox/conversations/${newer.conversation.id}`)).data.handoff_reason,'workflow-handoff');
+
+  // Many closer passages in a lower-priority source cannot crowd the higher-priority source out of the evidence.
+  // Each post is about 200 tokens, so every one becomes its own passage.
+  await upload(b,'forum','forum.txt',text(Array.from({length:8},(_,i)=>`Post ${i}: how long do refunds take? ${'Refunds take ages. '.repeat(40)}`).join('\n')));
+  await ingested(b,'forum');
+  const crowd=`crowd-${crypto.randomUUID()}`;
+  await publish(b,grounded(crowd,{sources:[{id:'handbook',priority:1},{id:'forum',priority:9}]}));
+  await script(`${crowd}.answer`,[cite('Refunds are paid within 14 days.')]);
+  await (await start(b)).ask('How long do refunds take?');
+  seen=await last(`${crowd}.answer`);
+  assert(seen.evidence.some(e=>e.source==='handbook'),'the higher-priority source keeps its best passage');
+  assert.equal(seen.evidence.filter(e=>e.source==='forum').length,3);
 });
 
 test('Knowledge versions: only complete versions activate; failed, interrupted or late replacements keep the active version and warn; older conversations use current content',async()=>{
@@ -346,7 +360,7 @@ test('Knowledge deletion: every version is excluded at once, including from dela
   assert.equal((await remove('late')).status,200);
   await wait(7000);
   assert.equal((await sources(b)).length,0);
-  assert.equal(sql(`SELECT count(*) FROM source_chunks WHERE content LIKE '%LATE-SENTINEL%'`),'0');
+  assert.equal(sql(`SELECT count(*) FROM source_chunks WHERE business_id='${b.id}' AND content LIKE '%LATE-SENTINEL%'`),'0');
   await upload(b,'late','late-v2.txt',text('Returns need proof of purchase.'));
   await active(b,'late','late-v2.txt');
   await script(`${key}.answer`,[cite('Please bring proof of purchase.','E1')]);

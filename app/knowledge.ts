@@ -5,8 +5,8 @@ import { pool } from './config.js';
 import { REF } from './configuration.js';
 import { body, Failure, keys, uuid } from './memberships.js';
 const route=new RegExp(`^/api/businesses/(${uuid})/sources(?:/(${REF.source.slice(1,-1)})(/delete)?)?$`);
-// 20 MiB. Uploads must declare their length, so an oversized one is refused before any byte is read.
-export const MAX_DOCUMENT=20*1024*1024;
+// 20 MB. Uploads must declare their length, so an oversized one is refused before any byte is read.
+const MAX_DOCUMENT=20_000_000;
 const formats:Record<string,string>={pdf:'pdf',docx:'docx',txt:'txt',md:'md',markdown:'md'};
 const owner=(client:PoolClient|typeof pool,business:string,user:string)=>client.query("SELECT 1 FROM memberships WHERE business_id=$1 AND operator_id=$2 AND active AND role='Owner'",[business,user]);
 
@@ -25,7 +25,7 @@ export async function knowledge(req:IncomingMessage,path:string,user:{id:string}
       if(!format||document.length>200||/[\u0000-\u001f/\\]/.test(document))throw new Failure(400,'Provide ?document=<file name> ending in .pdf, .docx, .txt, .md or .markdown (at most 200 characters)');
       const length=Number(req.headers['content-length']);
       if(!req.headers['content-length']||!Number.isInteger(length))throw new Failure(411,'Content-Length required');
-      if(length>MAX_DOCUMENT)throw new Failure(413,'Documents are limited to 20 MiB; nothing was uploaded');
+      if(length>MAX_DOCUMENT)throw new Failure(413,'Documents are limited to 20 MB (20,000,000 bytes); nothing was uploaded');
       if(length===0)throw new Failure(400,'The document is empty');
       // Checked again under the Business lock below; this only avoids reading a non-Owner's upload.
       if(!(await owner(pool,business,user.id)).rowCount)throw new Failure(404,'Business not found');

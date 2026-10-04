@@ -37,11 +37,16 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def cached(name):
+    path = ROOT / name
+    return path.exists() and sha256(path) == FILES[name]
+
+
 def download():
     for name, expected in FILES.items():
-        path = ROOT / name
-        if path.exists() and sha256(path) == expected:
+        if cached(name):
             continue
+        path = ROOT / name
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_name(path.name + '.part')
         print(f'Downloading {MODEL}@{REVISION[:7]} {name}', flush=True)
@@ -61,9 +66,8 @@ class Unreadable(Exception):
 
 class Embedder:
     def __init__(self):
-        for name, expected in FILES.items():
-            path = ROOT / name
-            if not path.exists() or sha256(path) != expected:
+        for name in FILES:
+            if not cached(name):
                 sys.exit(f'Embedding model file {name} is missing or changed in the model cache ({ROOT}). '
                          'There is no cloud embedding fallback. Run `docker compose run --rm models` once with network access.')
         import numpy
@@ -101,10 +105,11 @@ class Embedder:
         ids = self.tokenizer.encode(text, add_special_tokens=False).ids[:MAX_TOKENS - 2 - len(self.instruction)]
         return self.vectors([[self.cls, *self.instruction, *ids, self.sep]])[0]
 
-    def passages(self, pages):
-        """[(page, text)] -> [(page, passage, token ids with specials)]."""
+    def passages(self, pages, tick=lambda: None):
+        """[(page, text)] -> [(page, passage, token ids with specials)]. tick() runs once per page."""
         result = []
         for page, text in pages:
+            tick()
             pieces = []
             for line in filter(None, (' '.join(line.split()) for line in text.split('\n'))):
                 encoded = self.tokenizer.encode(line, add_special_tokens=False)
@@ -132,8 +137,8 @@ def clean(text):
     return re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', text).strip()
 
 
-def parse(fmt, data):
-    """Readable text as [(page or None, text)]; anything unreadable raises Unreadable."""
+def parse(fmt, data, tick=lambda: None):
+    """Readable text as [(page or None, text)]; anything unreadable raises Unreadable. tick() runs once per PDF page."""
     if fmt == 'pdf':
         import pypdf
         if not data.startswith(b'%PDF-'):
@@ -142,17 +147,20 @@ def parse(fmt, data):
             reader = pypdf.PdfReader(io.BytesIO(data))
             if reader.is_encrypted and not reader.decrypt(''):
                 raise Unreadable('the PDF is password-protected')
-            pages = [(number, clean(page.extract_text() or '')) for number, page in enumerate(reader.pages, 1)]
+            pages = []
+            for number, page in enumerate(reader.pages, 1):
+                tick()
+                pages.append((number, clean(page.extract_text() or '')))
         except Unreadable:
             raise
         except Exception:
             raise Unreadable('the PDF could not be read')
-        blank = sum(not text for _, text in pages)
-        # ponytail: a PDF fails when no page or under half its pages have text (a cover image or blank page is fine);
-        # per-page OCR is out of scope, so a mostly scanned file is never reported as ingested.
-        if not pages or blank * 2 > len(pages):
-            raise Unreadable(f'{blank} of {len(pages)} PDF pages have no extractable text (scanned pages need OCR, which is not supported)')
-        return [(number, text) for number, text in pages if text]
+        blank = [str(number) for number, text in pages if not text]
+        # Any page without text fails the whole file, so no partly scanned document is reported as ingested.
+        if not pages or blank:
+            raise Unreadable(f'{len(blank)} of {len(pages)} PDF pages have no extractable text (page {", ".join(blank[:10])}'
+                             f'{", …" if len(blank) > 10 else ""}; scanned pages need OCR, which is not supported)')
+        return pages
     if fmt == 'docx':
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:

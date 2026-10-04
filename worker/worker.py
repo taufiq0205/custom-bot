@@ -260,12 +260,16 @@ class Turn:
     def retrieve(self, step):
         """Top passages of the step's sources, from each source's current active version only: not deleted, this Business,
         and embedded with the worker's current model and policy. Similarity ranks evidence; it is not a confidence threshold."""
-        vector = '[' + ','.join(f'{x:.8g}' for x in EMBEDDER.query(self.message)) + ']'
+        vector = literal(EMBEDDER.query(self.message))
+        # The best passages of each source, so a lower-priority source can never crowd a higher-priority one out of the evidence.
+        # ponytail: exact scan of the Business's passages, no vector index; add a filtered HNSW index when a Business outgrows it.
         rows = self.connection.execute(
-            "SELECT c.id,c.source_id,s.ref,v.document,c.page,c.content FROM source_chunks c "
-            "JOIN knowledge_sources s ON s.id=c.source_id AND s.active_version_id=c.version_id JOIN source_versions v ON v.id=c.version_id "
-            "WHERE c.business_id=%s AND s.business_id=%s AND s.deleted_at IS NULL AND s.ref=ANY(%s) AND v.encoding=%s "
-            "ORDER BY c.embedding <=> %s::vector LIMIT 5", (self.job[1], self.job[1], step['sources'], EMBEDDER.encoding, vector)).fetchall()
+            "SELECT id,source_id,ref,document,page,content FROM (SELECT c.id,c.source_id,s.ref,v.document,c.page,c.content,"
+            "c.embedding <=> %s::vector AS distance,row_number() OVER (PARTITION BY c.source_id ORDER BY c.embedding <=> %s::vector) AS rank "
+            "FROM source_chunks c JOIN knowledge_sources s ON s.id=c.source_id AND s.active_version_id=c.version_id "
+            "JOIN source_versions v ON v.id=c.version_id WHERE c.business_id=%s AND s.business_id=%s AND s.deleted_at IS NULL "
+            "AND s.ref=ANY(%s) AND v.encoding=%s) ranked WHERE rank<=3 ORDER BY distance",
+            (vector, vector, self.job[1], self.job[1], step['sources'], EMBEDDER.encoding)).fetchall()
         priority = {s['id']: s['priority'] for s in self.document.get('sources', [])}
         self.evidence = self.evidence or []
         seen = {e['chunk'] for e in self.evidence}
@@ -498,6 +502,11 @@ class Turn:
             step = steps[links[(step['id'], output)]]
 
 
+def literal(vector):
+    """A pgvector text literal."""
+    return '[' + ','.join(f'{x:.8g}' for x in vector) + ']'
+
+
 def same(a, b):
     """Structured equality: true is not 1, and 1 equals 1.0."""
     def number(v):
@@ -708,7 +717,8 @@ def renew(connection, job):
 
 
 def settle(connection, job, error):
-    """A failed or discarded candidate: the active version, if any, stays in use. Lock order everywhere: source, job, version."""
+    """A failed or discarded candidate: the active version, if any, stays in use. Whoever locks more than one of these
+    takes them in the order source, job, version."""
     with connection.transaction():
         connection.execute("UPDATE jobs SET status='failed', lease_owner=NULL, error=%s WHERE id=%s", (error, job[0]))
         connection.execute("UPDATE source_versions SET state='failed', error=%s, content=NULL, finished_at=clock_timestamp() "
@@ -721,8 +731,8 @@ def ingest(connection, job):
     if not row or row[1] is None:
         return settle(connection, job, 'source deleted')
     try:
-        pages = knowledge.parse(row[0], bytes(row[1]))
-        passages = EMBEDDER.passages(pages)
+        pages = knowledge.parse(row[0], bytes(row[1]), lambda: renew(connection, job))
+        passages = EMBEDDER.passages(pages, lambda: renew(connection, job))
         vectors = []
         for start in range(0, len(passages), 32):
             renew(connection, job)
@@ -745,7 +755,7 @@ def ingest(connection, job):
             with connection.cursor() as cursor:
                 cursor.executemany("INSERT INTO source_chunks(business_id,source_id,version_id,ordinal,page,content,embedding) "
                                    "VALUES(%s,%s,%s,%s,%s,%s,%s::vector)",
-                                   [(job[1], source[0], job[2], n, page, text, '[' + ','.join(f'{x:.8g}' for x in vector) + ']')
+                                   [(job[1], source[0], job[2], n, page, text, literal(vector))
                                     for n, ((page, text, _), vector) in enumerate(zip(passages, vectors))])
             if source[2]:
                 # The replaced version is no longer retrievable or re-indexable: its passages and bytes go.
@@ -766,7 +776,7 @@ def reindex(connection):
         for business, source, version in connection.execute(
                 "SELECT s.business_id,s.id,a.id FROM knowledge_sources s JOIN source_versions a ON a.id=s.active_version_id "
                 "WHERE s.deleted_at IS NULL AND a.encoding<>%s AND NOT EXISTS(SELECT 1 FROM source_versions c WHERE c.source_id=s.id "
-                "AND c.state IN ('queued','running')) FOR UPDATE OF s", (EMBEDDER.encoding,)).fetchall():
+                "AND c.state IN ('queued','running')) FOR UPDATE OF s SKIP LOCKED", (EMBEDDER.encoding,)).fetchall():
             candidate = uuid.uuid4()
             connection.execute("INSERT INTO source_versions(id,business_id,source_id,document,format,size,content) "
                                "SELECT %s,business_id,source_id,document,format,size,content FROM source_versions WHERE id=%s", (candidate, version))
@@ -802,6 +812,12 @@ def ingestion():
                         ingest(connection, job)
                     except Lost:
                         print(f'Ingestion job {job[0]} lost its lease; result discarded', flush=True)
+                    except psycopg.Error:
+                        raise
+                    except Exception as failure:
+                        # Never let one document stop ingestion; the candidate fails visibly, without document content in the log.
+                        print(f'Ingestion job {job[0]} failed: {type(failure).__name__}', flush=True)
+                        settle(connection, job, 'the document could not be processed')
         except psycopg.Error:
             print('Ingestion lost its database connection; retrying', flush=True)
             time.sleep(2)
