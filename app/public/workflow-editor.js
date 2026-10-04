@@ -3,7 +3,8 @@ const $=selector=>document.querySelector(selector),
  root=$('#workflow-editor'),code=$('#config-text'),canvas=$('#workflow-canvas'),world=$('#workflow-world'),
  nodes=$('#workflow-nodes'),wires=$('#workflow-wires'),inspector=$('#config-inspector');
 const OUTPUTS={retrieval:['next'],condition:['yes','fallback'],http:['success','failure'],agent:s=>s.final?['unsupported']:['next','unsupported'],handoff:[]};
-const TYPES={retrieval:{label:'Knowledge',icon:'▤',color:'#0c7166',description:'Search assigned knowledge'},condition:{label:'Condition',icon:'⑂',color:'#7359a7',description:'Branch on a field'},http:{label:'API action',icon:'↗',color:'#b35d22',description:'Read live business data'},agent:{label:'Agent',icon:'✦',color:'#19719a',description:'Generate a customer reply'},handoff:{label:'Human takeover',icon:'☏',color:'#b24f63',description:'Pause and send to support'}};
+// Step colours follow the validated prototype.
+const TYPES={retrieval:{label:'Knowledge',icon:'▤',color:'#0c7166',description:'Search assigned knowledge'},condition:{label:'Condition',icon:'⑂',color:'#8f5400',description:'Branch on a field'},http:{label:'API action',icon:'↗',color:'#3f47b5',description:'Read live business data'},agent:{label:'Agent',icon:'✦',color:'#6b39b8',description:'Generate a customer reply'},handoff:{label:'Human takeover',icon:'☏',color:'#bf2f4b',description:'Pause and send to support'}};
 const EDGE_KIND={next:'ok',yes:'ok',success:'ok',fallback:'alt',failure:'bad',unsupported:'bad'};
 const EDGE_TEXT={yes:'Yes',fallback:'Else',success:'Success',failure:'Failure',unsupported:'Unsupported'};
 const GRID=20,clone=value=>JSON.parse(JSON.stringify(value));
@@ -228,9 +229,11 @@ function wirePort(port,step){
 }
 function drawGraph(){
  if(!documentDraft)return;live={};nodes.replaceChildren(...documentDraft.workflow.steps.map(nodeElement));metrics={};
- for(const node of nodes.children){const input=node.querySelector('.node-input-port').getBoundingClientRect(),base=world.getBoundingClientRect(),scale=camera.k;
-  metrics[node.dataset.stepId]={input:{x:(input.left+input.width/2-base.left)/scale,y:(input.top+input.height/2-base.top)/scale},outputs:{},size:{w:node.offsetWidth,h:node.offsetHeight}};
-  for(const port of node.querySelectorAll('.output-port')){const r=port.getBoundingClientRect();metrics[node.dataset.stepId].outputs[port.dataset.output]={x:(r.left+r.width/2-base.left)/scale,y:(r.top+r.height/2-base.top)/scale};}
+ // Port centres from layout offsets relative to their node, so camera transforms and transitions cannot skew them.
+ const centre=(element,node)=>{let x=node.clientLeft+element.offsetWidth/2,y=node.clientTop+element.offsetHeight/2;for(let at=element;at&&at!==node;at=at.offsetParent){x+=at.offsetLeft;y+=at.offsetTop;}return {x,y};};
+ for(const node of nodes.children){
+  metrics[node.dataset.stepId]={input:centre(node.querySelector('.node-input-port'),node),outputs:{},size:{w:node.offsetWidth,h:node.offsetHeight}};
+  for(const port of node.querySelectorAll('.output-port'))metrics[node.dataset.stepId].outputs[port.dataset.output]=centre(port,node);
  }
  drawWires();applyCamera();
 }
@@ -256,13 +259,13 @@ function applyCamera(){
 function toWorld(clientX,clientY){const rect=canvas.getBoundingClientRect();return {x:(clientX-rect.left-camera.x)/camera.k,y:(clientY-rect.top-camera.y)/camera.k};}
 function bounds(){let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;for(const step of documentDraft.workflow.steps){const p=position(step.id),size=metrics[step.id]?.size||{w:244,h:150};left=Math.min(left,p.x);top=Math.min(top,p.y);right=Math.max(right,p.x+size.w);bottom=Math.max(bottom,p.y+size.h);}return {x:left,y:top,w:Math.max(1,right-left),h:Math.max(1,bottom-top)};}
 function usable(){const rect=canvas.getBoundingClientRect(),panel=inspector.getBoundingClientRect();if(!inspector.hidden&&window.matchMedia('(max-width: 720px)').matches)return {w:rect.width,h:Math.max(180,panel.top-rect.top-12)};if(!inspector.hidden&&panel.left>rect.left+rect.width/2)return {w:panel.left-rect.left-20,h:rect.height};return {w:rect.width,h:rect.height};}
-function fitView(){if(!documentDraft)return;const rect=canvas.getBoundingClientRect(),area=usable(),graph=bounds(),padding=64;if(!rect.width)return;camera.k=Math.max(.35,Math.min(1.5,(area.w-padding*2)/graph.w,(area.h-padding*2)/graph.h));camera.x=(area.w-graph.w*camera.k)/2-graph.x*camera.k;camera.y=(area.h-graph.h*camera.k)/2-graph.y*camera.k;applyCamera();}
+function fitView(){if(!documentDraft)return;const rect=canvas.getBoundingClientRect(),area=usable(),graph=bounds(),padding=64;if(!rect.width)return;camera.k=Math.max(.35,Math.min(1,(area.w-padding*2)/graph.w,(area.h-padding*2)/graph.h));camera.x=(area.w-graph.w*camera.k)/2-graph.x*camera.k;camera.y=(area.h-graph.h*camera.k)/2-graph.y*camera.k;applyCamera();}
 function centerOn(id){const step=stepOf(documentDraft,id);if(!step)return;const area=usable(),size=metrics[id]?.size||{w:244,h:150};camera.x=area.w/2-(step.position.x+size.w/2)*camera.k;camera.y=area.h/2-(step.position.y+size.h/2)*camera.k;applyCamera();}
 function ensureVisible(id){const node=nodes.querySelector(`[data-step-id="${CSS.escape(id)}"]`);if(!node)return;const rect=node.getBoundingClientRect(),view=canvas.getBoundingClientRect(),area=usable();if(rect.left<view.left||rect.top<view.top||rect.right>view.left+area.w||rect.bottom>view.top+area.h)centerOn(id);}
 function zoomAt(factor,clientX,clientY){const rect=canvas.getBoundingClientRect(),x=clientX==null?rect.width/2:clientX-rect.left,y=clientY==null?rect.height/2:clientY-rect.top,next=Math.max(.25,Math.min(2,camera.k*factor));camera.x=x-(x-camera.x)*next/camera.k;camera.y=y-(y-camera.y)*next/camera.k;camera.k=next;applyCamera();drawWires();}
 function drawMinimap(){
  const map=$('#workflow-minimap');if(!documentDraft||map.hidden)return;map.replaceChildren(svg('title',{},));const box={w:184,h:112},graph=bounds(),scale=Math.min((box.w-18)/graph.w,(box.h-18)/graph.h),offset={x:(box.w-graph.w*scale)/2-graph.x*scale,y:(box.h-graph.h*scale)/2-graph.y*scale};
- for(const step of documentDraft.workflow.steps){const p=position(step.id),size=metrics[step.id]?.size||{w:244,h:150};map.append(svg('rect',{x:offset.x+p.x*scale,y:offset.y+p.y*scale,width:Math.max(3,size.w*scale),height:Math.max(3,size.h*scale),rx:2,class:'map-node'}));}
+ for(const step of documentDraft.workflow.steps){const p=position(step.id),size=metrics[step.id]?.size||{w:244,h:150};map.append(svg('rect',{x:offset.x+p.x*scale,y:offset.y+p.y*scale,width:Math.max(3,size.w*scale),height:Math.max(3,size.h*scale),rx:2,class:'map-node',fill:(TYPES[step.type]||TYPES.handoff).color}));}
  const visible=usable(),rect=canvas.getBoundingClientRect(),worldLeft=-camera.x/camera.k,worldTop=-camera.y/camera.k;
  map.append(svg('rect',{x:offset.x+worldLeft*scale,y:offset.y+worldTop*scale,width:visible.w/camera.k*scale,height:visible.h/camera.k*scale,class:'map-viewport'}));
  map._map={scale,offset,rect:map.getBoundingClientRect()};
@@ -382,6 +385,7 @@ window.workflowEditor={
  clear(){documentDraft=null;validation={json_valid:true,errors:[],blockers:[]};validatedText='';code.value='';selected=null;selectedEdge=null;view='visual';root.hidden=true;render();},
  setValidation(value){validation=value;validatedText=code.value;if(value?.json_valid&&!value?.errors?.length){try{documentDraft=JSON.parse(code.value);}catch{documentDraft=null;}}else documentDraft=null;if(!documentDraft)view='json';render();},
  setServices(value){services={...services,...value};},
+ shown(){if(view==='visual'&&documentDraft){drawGraph();fitView();}},
  refreshActions(){renderIssues();},
  getText(){return code.value;},
  getValidation(){return validationForCurrentText();}

@@ -50,6 +50,7 @@ test('browser: register, verify, sign in, create Owner Business, recover, sign o
   await page.getByLabel('Business name').fill('Browser Business');
   await page.getByRole('button',{name:'Create Business as Owner'}).click();
   await page.getByText('Browser Business — Owner').waitFor();
+  await page.getByRole('button',{name:'Account',exact:true}).click();
   await page.getByRole('button',{name:'Recover access'}).click();
   await page.getByText('If the account exists, a recovery code has been sent.').waitFor();
   await page.getByLabel('One-time code').fill(await otp(email,'forget-password'));
@@ -80,6 +81,7 @@ test('browser: invite, accept, promote/demote, cancel, revoke; Support UI hides 
   await ownerPage.getByLabel('Business name').fill('Browser Memberships');
   await ownerPage.getByRole('button',{name:'Create Business as Owner'}).click();
   await ownerPage.getByRole('button',{name:'Manage Browser Memberships'}).click();
+  await ownerPage.getByRole('button',{name:'Team and website'}).click();
   await ownerPage.getByLabel('Invite email').fill(target.email);
   await ownerPage.getByRole('button',{name:'Send invitation',exact:true}).click();
   await ownerPage.getByText('Invitation sent to the intended email.',{exact:true}).waitFor();
@@ -87,7 +89,9 @@ test('browser: invite, accept, promote/demote, cancel, revoke; Support UI hides 
   await targetPage.getByRole('button',{name:'Accept invitation',exact:true}).click();
   await targetPage.getByText('Browser Memberships — Support',{exact:true}).waitFor();
   assert.equal(await targetPage.getByRole('button',{name:'Manage Browser Memberships'}).count(),0);
+  await ownerPage.getByRole('button',{name:'Businesses',exact:true}).click();
   await ownerPage.getByRole('button',{name:'Manage Browser Memberships'}).click();
+  await ownerPage.getByRole('button',{name:'Team and website'}).click();
   await ownerPage.getByRole('button',{name:`Change role: ${target.email}`,exact:true}).click();
   await ownerPage.locator('#members li').filter({hasText:`${target.email} — Owner`}).waitFor();
   await targetPage.reload();await targetPage.getByRole('button',{name:'Manage Browser Memberships'}).waitFor();
@@ -126,6 +130,7 @@ test('browser: Owner approves a website; anonymous Customers chat with labelled 
   await ownerPage.getByLabel('Password',{exact:true}).fill(owner.password);
   await ownerPage.getByRole('button',{name:'Sign in',exact:true}).click();
   await ownerPage.getByRole('button',{name:'Manage Browser Chat'}).click();
+  await ownerPage.getByRole('button',{name:'Team and website'}).click();
   await ownerPage.getByLabel('Website origin').fill(approved);
   await ownerPage.getByRole('button',{name:'Approve origin',exact:true}).click();
   await ownerPage.getByText('Website origin approved.',{exact:true}).waitFor();
@@ -288,9 +293,11 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   assert.equal(await page.getByRole('button',{name:'Publish',exact:true}).isDisabled(),true);
   // Another Owner action refreshes the page data but never replaces the editor text.
   await editor.fill(invalid+' ');
+  await page.getByRole('button',{name:'Team and website'}).click();
   await page.getByLabel('Invite email').fill(`browser-config-${crypto.randomUUID()}@example.test`);
   await page.getByRole('button',{name:'Send invitation',exact:true}).click();
   await page.getByText('Invitation sent to the intended email.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Configuration',exact:true}).click();
   assert.equal(await editor.inputValue(),invalid+' ');
   await page.reload();await open();
   assert.equal(await editor.inputValue(),invalid);
@@ -319,6 +326,8 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   await page.getByRole('button',{name:'Reload draft',exact:true}).click();
   await page.getByText('Latest draft loaded.',{exact:true}).waitFor();
   assert.equal(await editor.inputValue(),JSON.stringify(doc));
+  // A valid draft reopens on the canvas; its text is edited in the JSON view.
+  await page.getByRole('button',{name:'JSON',exact:true}).click();
   await editor.fill(local);
   await page.getByRole('button',{name:'Publish',exact:true}).click();
   await page.getByText(/^Published version 2\./).waitFor();
@@ -331,6 +340,7 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   const otherDraft=url=>url.pathname===otherPath;
   await page.route(otherDraft,route=>route.abort());
   page.once('dialog',d=>d.accept());
+  await page.getByRole('button',{name:'Businesses',exact:true}).click();
   await page.getByRole('button',{name:'Manage Browser Config Other'}).click();
   await page.waitForFunction(()=>document.querySelector('#membership-title').textContent.includes('Browser Config Other'));
   assert.equal(await editor.inputValue(),'');
@@ -341,6 +351,7 @@ test('browser: Owner keeps invalid JSON across reload, sees located errors, keep
   assert.equal(otherAfter.text,otherBefore.text);assert.equal(otherAfter.revision,otherBefore.revision);
   await page.unroute(otherDraft);
   // Signing out leaves no draft text in the page.
+  await page.getByRole('button',{name:'Businesses',exact:true}).click();
   await page.getByRole('button',{name:'Manage Browser Config Other'}).click();
   await page.getByText(/Draft revision \d+ · published version 1/).waitFor();
   await page.getByRole('button',{name:'Sign out',exact:true}).click();
@@ -370,6 +381,13 @@ test('browser: workflow and JSON edit the complete persisted configuration; inva
   await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForTimeout(1000);assert.equal(await page.locator('#status').innerText(),'Signed in.',`status=${await page.locator('#status').innerText()} pageErrors=${errors.join('; ')}`);await page.getByLabel('Business name').waitFor();assert.deepEqual(errors,[]);await open();
   const code=page.getByLabel('Configuration JSON');
   assert.equal(await page.getByRole('button',{name:'Workflow',exact:true}).getAttribute('aria-pressed'),'true');
+  // Only the selected view is shown, and every wire ends on its target's input port (measured on screen, through the camera transform).
+  assert.equal(await code.isVisible(),false,'JSON text is hidden in the Workflow view');
+  const gaps=await page.evaluate(()=>[...document.querySelectorAll('.workflow-edge[data-to]')].map(edge=>{
+    const end=edge.getPointAtLength(edge.getTotalLength()).matrixTransform(edge.getScreenCTM());
+    const port=document.querySelector(`[data-step-id="${CSS.escape(edge.dataset.to)}"] .node-input-port`).getBoundingClientRect();
+    return Math.hypot(end.x-(port.left+port.width/2),end.y-(port.top+port.height/2));}));
+  assert(gaps.length>0&&gaps.every(gap=>gap<3),`wire ends are ${gaps.map(g=>g.toFixed(1)).join(', ')} px from their input ports`);
   assert.equal(await page.locator('[data-step-id="route"]').count(),1);
   assert((await page.locator('#workflow-wires text').allTextContents()).includes('Else'));
   await page.getByRole('button',{name:'Fit workflow to view'}).click();await page.locator('#workflow-canvas').scrollIntoViewIfNeeded();

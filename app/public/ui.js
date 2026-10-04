@@ -1,5 +1,22 @@
 const status = document.querySelector('#status');
 let selectedBusiness=null;
+// Views change only on sign-in/out, Manage, Open inbox, rail navigation or lost access; never after saves, publishes or polling.
+const app=document.querySelector('#app');
+const titles={account:'Operator access',home:'Businesses',configuration:'Configuration',team:'Team and website',inbox:'Inbox'};
+function show(view) {
+  app.dataset.view=view;
+  for(const item of document.querySelectorAll('[data-nav]'))item.setAttribute('aria-current',String(item.dataset.nav===view));
+  document.querySelector('#crumb-title').textContent=titles[view];
+  const business=view==='inbox'?inboxBusiness:['configuration','team'].includes(view)?selectedBusiness:null;
+  document.querySelector('#crumb-business').textContent=business?.name??'Custom Bot';
+  // The canvas measures its nodes only while visible.
+  if(view==='configuration')window.workflowEditor.shown();
+}
+function updateRail() {
+  for(const item of document.querySelectorAll('[data-nav=configuration],[data-nav=team]'))item.disabled=!selectedBusiness;
+  document.querySelector('[data-nav=inbox]').disabled=!inboxBusiness;
+}
+for(const item of document.querySelectorAll('[data-nav]'))item.addEventListener('click',()=>show(item.dataset.nav));
 async function request(path, body) {
   const response = await fetch(path, {method: body ? 'POST' : 'GET', headers:{'Content-Type':'application/json'}, body:body?JSON.stringify(body):undefined});
   const data = await response.json();
@@ -19,19 +36,22 @@ async function refresh() {
     workspace.hidden=false;
     list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.append(Object.assign(document.createElement('span'),{textContent:`${b.name} — ${b.role}`}));
       const inboxButton=document.createElement('button');inboxButton.textContent=`Open inbox ${b.name}`;
-      inboxButton.addEventListener('click',()=>run(async()=>{if(inboxBusiness?.id!==b.id){closeInbox();inboxBusiness=b;}await loadInbox();}));li.append(inboxButton);
-      if(b.role==='Owner'){const button=document.createElement('button');button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{if(!discardEdits())return;clearConfiguration();selectedBusiness=b;await refreshMemberships();await loadConfiguration();}));li.append(button);}
+      inboxButton.addEventListener('click',()=>run(async()=>{if(inboxBusiness?.id!==b.id){closeInbox();inboxBusiness=b;}await loadInbox();show('inbox');}));li.append(inboxButton);
+      if(b.role==='Owner'){const button=document.createElement('button');button.className='btn-primary';button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{if(!discardEdits())return;clearConfiguration();selectedBusiness=b;show('configuration');await refreshMemberships();await loadConfiguration();}));li.append(button);}
       return li;}));
-      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) {selectedBusiness=null;clearConfiguration();}
-      if(inboxBusiness && !businesses.some(b=>b.id===inboxBusiness.id))closeInbox();
+      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) {selectedBusiness=null;clearConfiguration();if(['configuration','team'].includes(app.dataset.view))show('home');}
+      if(inboxBusiness && !businesses.some(b=>b.id===inboxBusiness.id)){closeInbox();if(app.dataset.view==='inbox')show('home');}
+    if(app.dataset.signedIn!=='true'){app.dataset.signedIn='true';show('home');}
+    updateRail();
     await refreshMemberships();
-  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;clearConfiguration();closeInbox();document.querySelector('#membership-panel').hidden=true;}
+  } catch {workspace.hidden=true;list.replaceChildren();selectedBusiness=null;clearConfiguration();closeInbox();document.querySelector('#membership-panel').hidden=true;
+    app.dataset.signedIn='false';updateRail();show('account');}
 }
 async function run(action) {
   const buttons=[...document.querySelectorAll('button')],disabled=new Map(buttons.map(button=>[button,button.disabled]));
   buttons.forEach(b=>b.disabled=true);
   try {await action();await refresh();} catch(error){status.textContent=error.message;}
-  finally {for(const button of document.querySelectorAll('button'))if(disabled.has(button))button.disabled=disabled.get(button);window.workflowEditor?.refreshActions();}
+  finally {for(const button of document.querySelectorAll('button'))if(disabled.has(button))button.disabled=disabled.get(button);updateRail();window.workflowEditor?.refreshActions();}
 }
 document.querySelector('#account').addEventListener('submit', event=>{
   event.preventDefault();
@@ -56,9 +76,9 @@ async function refreshMemberships() {
   const path=`/api/businesses/${selectedBusiness.id}`;
   const members=await request(path+'/memberships');
   document.querySelector('#members').replaceChildren(...members.map(m=>{
-    const li=document.createElement('li');li.textContent=`${m.email} — ${m.role}${m.active?'':' (revoked)'}`;
+    const li=document.createElement('li');li.append(Object.assign(document.createElement('span'),{textContent:`${m.email} — ${m.role}${m.active?'':' (revoked)'}`}));
     if(m.active)for(const action of ['Change role','Revoke']){
-      const button=document.createElement('button');button.textContent=`${action}: ${m.email}`;
+      const button=document.createElement('button');button.textContent=action;button.setAttribute('aria-label',`${action}: ${m.email}`);
       button.addEventListener('click',()=>run(async()=>{
         await request(path+'/memberships/'+m.operator_id,{role:action==='Change role'?(m.role==='Owner'?'Support':'Owner'):m.role,active:action!=='Revoke',revision:m.revision});
         status.textContent='Membership updated.';
@@ -70,15 +90,15 @@ async function refreshMemberships() {
   document.querySelector('#invitations').replaceChildren(...invitations.map(i=>{
     const li=document.createElement('li');
     const state=i.consumed_at?'accepted':i.revoked_at?'revoked':new Date(i.expires_at)<=new Date()?'expired':'pending';
-    li.textContent=`${i.email} — ${i.role} invitation (${state})`;
-    if(state==='pending'){const button=document.createElement('button');button.textContent=`Cancel invitation: ${i.email}`;
+    li.append(Object.assign(document.createElement('span'),{textContent:`${i.email} — ${i.role} invitation (${state})`}));
+    if(state==='pending'){const button=document.createElement('button');button.textContent='Cancel invitation';button.setAttribute('aria-label',`Cancel invitation: ${i.email}`);
       button.addEventListener('click',()=>run(async()=>{await request(path+'/invitations/'+i.id,{});status.textContent='Invitation cancelled.';}));li.append(button);}
     return li;
   }));
   const origins=await request(path+'/website-origins');
   document.querySelector('#origins').replaceChildren(...origins.map(origin=>{
-    const li=document.createElement('li');li.textContent=origin;
-    const button=document.createElement('button');button.textContent=`Remove origin: ${origin}`;
+    const li=document.createElement('li');li.append(Object.assign(document.createElement('span'),{textContent:origin}));
+    const button=document.createElement('button');button.textContent='Remove';button.setAttribute('aria-label',`Remove origin: ${origin}`);
     button.addEventListener('click',()=>run(async()=>{await request(path+'/website-origins',{origin,approved:false});status.textContent='Website origin removed.';}));
     li.append(button);return li;
   }));
