@@ -1,8 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { chromium } from 'playwright';
@@ -34,7 +31,7 @@ const handedOff=turn=>{
   assert.equal(turn.conversation.control_state,'waiting-for-support');
 };
 
-test('browser: an Owner uploads, sees a failed replacement warning while the previous version stays active, and deletes; a Customer sees cited documents; Support has no Knowledge view',async()=>{
+test('browser: an Owner uploads, sees a failed replacement warning while the previous version stays active, expires and deletes; a Customer sees cited documents; Support has no Knowledge view',async()=>{
   const t=await team();
   const b=await business('knowledge-browser',{owner:t.owner});
   assert.equal((await t.owner.request(`/api/businesses/${b.id}/invitations`,{email:t.support.email,role:'Support'})).status,201);
@@ -70,6 +67,11 @@ test('browser: an Owner uploads, sees a failed replacement warning while the pre
       await row.locator('.warning',{hasText:'The latest upload (scan.pdf) failed: 2 of 2 PDF pages have no extractable text'}).waitFor();
       assert.match(await row.textContent(),/Active: returns\.md .*Answers still use returns\.md\./);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`no horizontal scroll at ${width}px`);
+      await row.getByRole('button',{name:`Expire source: ${ref}`}).click();
+      await page.getByText(`Source ${ref} expired.`).waitFor();
+      await row.locator('.warning',{hasText:/^Expired .+: not used for answers\. Upload a replacement to use this source again\.$/}).waitFor();
+      assert.match(await row.textContent(),/No usable version/);
+      assert.equal(await row.getByRole('button',{name:`Expire source: ${ref}`}).count(),0);
       await row.getByRole('button',{name:`Delete source: ${ref}`}).click();
       await page.getByText(`Source ${ref} deleted.`).waitFor();
       assert.equal(await page.locator('#knowledge-sources li',{hasText:ref}).count(),0);
@@ -386,8 +388,53 @@ test('Knowledge deletion: every version is excluded at once, including from dela
     const settled=await late.settle(message);
     handedOff({conversation:settled,replies:settled.messages.filter(m=>m.reply_to===message.id)});
     assert.equal((await calls(`${flow}.answer`)).length,shape==='intermediate'?0:1);
-    assert.equal(sql(`SELECT error FROM jobs WHERE message_id='${message.id}'`),shape==='intermediate'?'knowledge source deleted':'knowledge source deleted before delivery');
+    assert.equal(sql(`SELECT error FROM jobs WHERE message_id='${message.id}'`),shape==='intermediate'?'knowledge source deleted or expired':'knowledge source deleted or expired before delivery');
   }
+});
+
+test('Knowledge expiry: an Owner expires a document; it stops answering at once, including in flight, until a new upload replaces it',async()=>{
+  const t=await team();
+  const b=await business('knowledge-expiry',{owner:t.owner});
+  const expire=(ref,who=b.owner)=>who.request(`/api/businesses/${b.id}/sources/${ref}/expire`,{});
+  const key=`expiry-${crypto.randomUUID()}`;
+  await upload(b,'hours','hours.txt',text('The shop opens at nine.'));
+  await active(b,'hours','hours.txt');
+  await publish(b,grounded(key,{sources:[{id:'hours',priority:1}]}));
+  const customer=await start(b);
+  const ask=async()=>{await script(`${key}.answer`,[cite('Here are our hours.')]);await customer.ask('When do you open?');return (await last(`${key}.answer`)).evidence.map(e=>e.text);};
+  assert.deepEqual(await ask(),['The shop opens at nine.']);
+  assert.equal((await expire('hours',t.outsider)).status,404);
+
+  // A candidate uploaded before the expiry is still held when it happens, and never activates afterwards.
+  await upload(b,'hours','hours-pending.txt',text('[hold 6s]\nThe shop opens at ten. PENDING-SENTINEL'));
+  for(let i=0;i<40&&(await sources(b))[0].latest.state!=='running';i++)await wait(250);
+  const expired=await expire('hours');
+  assert.equal(expired.status,200);
+  assert.equal(expired.data.ref,'hours');
+  let source=(await sources(b))[0];
+  assert.equal(source.active,null);
+  assert.match(source.warning,/^Expired .+: not used for answers\. Upload a replacement to use this source again\.$/);
+  assert.deepEqual(await ask(),[]);
+  await wait(7000);
+  source=(await sources(b))[0];
+  assert.deepEqual([source.active,source.latest.document,source.latest.state],[null,'hours-pending.txt','expired']);
+  assert.equal(sql(`SELECT count(*) FROM source_chunks WHERE business_id='${b.id}'`),'0');
+  assert.equal(sql(`SELECT count(*) FROM source_versions WHERE business_id='${b.id}' AND content IS NOT NULL`),'0');
+  assert.equal((await expire('hours')).status,404);
+
+  // A new upload makes the source usable again; expiring while a provider holds its passages stops the reply.
+  await upload(b,'hours','hours-2026.txt',text('The shop opens at eight.'));
+  await active(b,'hours','hours-2026.txt');
+  assert.deepEqual(await ask(),['The shop opens at eight.']);
+  await script(`${key}.answer`,[{...cite('We open at eight.','E1'),delay:4}]);
+  const late=await start(b);
+  const message=await late.send('When do you open?');
+  const before=(await calls(`${key}.answer`)).length;
+  for(let i=0;i<40&&(await calls(`${key}.answer`)).length===before;i++)await wait(250);
+  assert.equal((await expire('hours')).status,200);
+  const settled=await late.settle(message);
+  handedOff({conversation:settled,replies:settled.messages.filter(m=>m.reply_to===message.id)});
+  assert.equal(sql(`SELECT error FROM jobs WHERE message_id='${message.id}'`),'knowledge source deleted or expired before delivery');
 });
 
 test('Knowledge injection: document text stays evidence data and cannot change instructions, routing or authority; policy evidence stays apart from live order data',async()=>{
@@ -422,7 +469,7 @@ test('Knowledge injection: document text stays evidence data and cannot change i
   assert.equal((await calls(key)).length,1);
 });
 
-test('Knowledge runtime: no egress, verified cache restart, missing or changed model files stop the worker, and an encoding change needs a complete new index',async()=>{
+test('Knowledge runtime: no egress, verified cache restart, an optional model whose absence fails knowledge visibly without cloud fallback, and an encoding change needs a complete new index',async()=>{
   const t=await team();
   const b=await business('knowledge-runtime',{owner:t.owner});
   const key=`runtime-${crypto.randomUUID()}`;
@@ -437,14 +484,42 @@ test('Knowledge runtime: no egress, verified cache restart, missing or changed m
   compose('restart','worker');await ready();
   assert.deepEqual(await ask(),['Descale the kettle every month with citric acid.']);
 
-  // Missing or changed model files stop the worker before it serves anything; nothing falls back to a cloud embedding.
-  const image=JSON.parse(compose('images','--format','json','worker'))[0];
-  const worker=(...args)=>execFileSync('docker',['run','--rm','--network','none','-e','DATABASE_URL=postgres://unused',...args],{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000});
-  const refused=error=>/Embedding model file .* is missing or changed in the model cache/.test(error.stderr)&&/There is no cloud embedding fallback/.test(error.stderr);
-  assert.throws(()=>worker('-v',`${mkdtempSync(join(tmpdir(),'custom-bot-models-'))}:/models`,`${image.Repository}:${image.Tag}`),refused);
+  const health=async()=>(await (await fetch(`${base}/health/ready`)).json());
+  assert.equal((await health()).knowledge,'available: BAAI/bge-small-en-v1.5@5c38ec7 on CPU');
+  // Changed model files count as missing: the pinned hashes are checked, and nothing falls back to a cloud embedding.
   const volume=JSON.parse(compose('config','--format','json')).volumes.models.name;
-  assert.throws(()=>worker('-v',`${volume}:/models:ro`,`${image.Repository}:${image.Tag}`,'sh','-c',
-    'cp -r /models /tmp/m && printf x >> /tmp/m/BAAI/bge-small-en-v1.5/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/tokenizer.json && MODEL_DIR=/tmp/m exec python worker.py'),refused);
+  const image=JSON.parse(compose('images','--format','json','worker'))[0];
+  const check=`import knowledge
+try: knowledge.Embedder()
+except knowledge.Unavailable as reason: print(reason)`;
+  assert.match(execFileSync('docker',['run','--rm','--network','none','-v',`${volume}:/models:ro`,`${image.Repository}:${image.Tag}`,'sh','-c',
+    `cp -r /models /tmp/m && printf x >> /tmp/m/BAAI/bge-small-en-v1.5/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/tokenizer.json && MODEL_DIR=/tmp/m python -c '${check}'`],{encoding:'utf8'}),
+    /^embedding model file tokenizer\.json is missing or changed in the model cache; there is no cloud embedding fallback/);
+  // A worker without the model still serves chat and lookups; readiness says why knowledge is unavailable,
+  // uploads fail visibly while the active version stays, and retrieval steps hand off instead of answering without evidence.
+  compose('stop','worker');
+  const bare=compose('run','-d','--no-deps','-e','MODEL_DIR=/not-installed','worker').trim();
+  try {
+    let ready_;
+    for(let i=0;i<80;i++){ready_=await health().catch(()=>({}));if(ready_.knowledge?.startsWith('knowledge unavailable'))break;await wait(250);}
+    assert.match(ready_.knowledge,/^knowledge unavailable: embedding model file .* is missing or changed .*Run `docker compose run --rm models`/);
+    assert.equal(ready_.status,'ready');
+    await upload(b,'care','care-v2.txt',text('Descale twice a month.'));
+    const failed=await ingested(b,'care');
+    assert.deepEqual([failed.latest.state,failed.active.document],['failed','care.txt']);
+    assert.match(failed.warning,/^The latest upload \(care-v2\.txt\) failed: knowledge unavailable: .*Answers still use care\.txt\.$/);
+    await script(`${key}.answer`,[cite('Here is how to care for it.')]);
+    const customer=await start(b);
+    const turn=await customer.ask('How do I descale my kettle?');
+    handedOff(turn);
+    assert.equal(sql(`SELECT error FROM jobs WHERE message_id='${turn.message.id}'`),'knowledge unavailable: embedding model not installed');
+    const chat=`runtime-chat-${crypto.randomUUID()}`;
+    await publish(b,config({agents:[agent(`${chat}.answer`)],steps:[{id:'answer',type:'agent',agent:'answer',final:true},handoff],links:[['answer','unsupported','support']]}));
+    await script(`${chat}.answer`,[reply({outcome:'reply',reply:'Hello! How can I help?'})]);
+    assert.deepEqual(delivered(await (await start(b)).ask('Hello')).map(m=>m.text),['Hello! How can I help?']);
+  } finally {execFileSync('docker',['rm','-f',bare],{stdio:'ignore'});compose('start','worker');}
+  for(let i=0;i<80&&!(await health().catch(()=>({}))).knowledge?.startsWith('available');i++)await wait(250);
+  await publish(b,grounded(key,{sources:[{id:'care',priority:1}]}));
 
   // An index built under another encoding is excluded at once, and answers return only after a complete re-index under the current one.
   sql(`UPDATE source_versions SET encoding='{"model":"an earlier policy"}' WHERE id='${before.latest.id}'`);
@@ -456,5 +531,5 @@ test('Knowledge runtime: no egress, verified cache restart, missing or changed m
   assert.equal(source.active.document,'care.txt');
   assert.deepEqual(await ask(),['Descale the kettle every month with citric acid.']);
   assert.deepEqual(sql(`SELECT state||':'||(content IS NULL) FROM source_versions WHERE source_id=(SELECT source_id FROM source_versions WHERE id='${before.latest.id}') ORDER BY seq`).split('\n'),
-    ['superseded:true','active:false']);
+    ['superseded:true','failed:true','active:false']);
 });

@@ -66,8 +66,8 @@ def heartbeat():
             with psycopg.connect(DATABASE, autocommit=True) as connection:
                 while True:
                     if time.monotonic() < alive_until:
-                            connection.execute("INSERT INTO worker_health(id,heartbeat) VALUES('worker',now()) "
-                                           "ON CONFLICT(id) DO UPDATE SET heartbeat=now()")
+                            connection.execute("INSERT INTO worker_health(id,heartbeat,knowledge) VALUES('worker',now(),%s) "
+                                           "ON CONFLICT(id) DO UPDATE SET heartbeat=now(),knowledge=EXCLUDED.knowledge", (KNOWLEDGE,))
                     time.sleep(2)
         except psycopg.Error:
             print('Worker waiting for migrations/database; check migrate and db services', flush=True)
@@ -235,11 +235,14 @@ def stale(connection, job, grants):
     return any(authorize(connection, job, action) != grant for action, grant in grants)
 
 
-def withdrawn(connection, sources):
-    """Whether any retrieved source has been deleted since. Inside a transaction, after the conversation lock: the share locks make
-    a concurrent deletion wait until this transaction commits, or show it as deleted."""
-    live = connection.execute('SELECT id FROM knowledge_sources WHERE id=ANY(%s) AND deleted_at IS NULL FOR SHARE', (list(sources),)).fetchall()
-    return len(live) != len(sources)
+def withdrawn(connection, versions):
+    """Whether any retrieved version's source has since been deleted or expired (a replacement does not withdraw it).
+    Inside a transaction, after the conversation lock: the share locks on the sources make a concurrent deletion or expiry wait
+    until this transaction commits, or show it; the conditions are on those locked rows, so they are rechecked after any wait."""
+    live = connection.execute('SELECT v.id FROM source_versions v JOIN knowledge_sources s ON s.id=v.source_id WHERE v.id=ANY(%s) '
+                              'AND s.deleted_at IS NULL AND (s.expired_through IS NULL OR v.seq>s.expired_through) FOR SHARE OF s',
+                              (list(versions),)).fetchall()
+    return len(live) != len(versions)
 
 
 class Turn:
@@ -254,17 +257,19 @@ class Turn:
         # like grants. citations: what the delivered reply cites.
         self.evidence, self.citations = None, []
 
-    def sources(self):
-        return {e['source_id'] for e in self.evidence or []}
+    def versions(self):
+        return {e['version_id'] for e in self.evidence or []}
 
     def retrieve(self, step):
         """Top passages of the step's sources, from each source's current active version only: not deleted, this Business,
         and embedded with the worker's current model and policy. Similarity ranks evidence; it is not a confidence threshold."""
+        if not EMBEDDER:
+            raise Stop(FAILED, 'knowledge unavailable: embedding model not installed')
         vector = literal(EMBEDDER.query(self.message))
         # The best passages of each source, so a lower-priority source can never crowd a higher-priority one out of the evidence.
         # ponytail: exact scan of the Business's passages, no vector index; add a filtered HNSW index when a Business outgrows it.
         rows = self.connection.execute(
-            "SELECT id,source_id,ref,document,page,content FROM (SELECT c.id,c.source_id,s.ref,v.document,c.page,c.content,"
+            "SELECT id,version_id,ref,document,page,content FROM (SELECT c.id,c.version_id,s.ref,v.document,c.page,c.content,"
             "c.embedding <=> %s::vector AS distance,row_number() OVER (PARTITION BY c.source_id ORDER BY c.embedding <=> %s::vector) AS rank "
             "FROM source_chunks c JOIN knowledge_sources s ON s.id=c.source_id AND s.active_version_id=c.version_id "
             "JOIN source_versions v ON v.id=c.version_id WHERE c.business_id=%s AND s.business_id=%s AND s.deleted_at IS NULL "
@@ -273,9 +278,9 @@ class Turn:
         priority = {s['id']: s['priority'] for s in self.document.get('sources', [])}
         self.evidence = self.evidence or []
         seen = {e['chunk'] for e in self.evidence}
-        for chunk, source, ref, document, page, text in rows:
+        for chunk, version, ref, document, page, text in rows:
             if chunk not in seen:
-                self.evidence.append({'chunk': chunk, 'source_id': source, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
+                self.evidence.append({'chunk': chunk, 'version_id': version, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
                                       'priority': priority[ref], 'document': document, 'page': page, 'text': text})
 
     def left(self):
@@ -293,7 +298,7 @@ class Turn:
         with self.connection.transaction():
             held = current(self.connection, self.job, bool(action or self.grants))
             changed = held and stale(self.connection, self.job, self.grants.values())
-            deleted = held and not changed and self.sources() and withdrawn(self.connection, self.sources())
+            deleted = held and not changed and self.versions() and withdrawn(self.connection, self.versions())
             changed = changed or deleted
             if held and not changed:
                 grant = authorize(self.connection, self.job, action, secret=True) if action else None
@@ -309,7 +314,7 @@ class Turn:
         if not held:
             raise Lost()
         if changed:
-            raise Stop(FAILED, 'knowledge source deleted' if deleted else 'action controls changed')
+            raise Stop(FAILED, 'knowledge source deleted or expired' if deleted else 'action controls changed')
         if denied == UNVERIFIED:
             raise Clarify(SIGN_IN)
         if denied:
@@ -652,7 +657,7 @@ def request(method, url, body, deadline, headers=None):
         connection.close()
 
 
-def finish(connection, job, outcome, text=None, grants=(), sources=(), citations=()):
+def finish(connection, job, outcome, text=None, grants=(), versions=(), citations=()):
     """Accept the turn's result only while it still holds authority; a failure or handoff step hands off in the same transaction."""
     with connection.transaction():
         if not current(connection, job, bool(grants)):
@@ -660,9 +665,9 @@ def finish(connection, job, outcome, text=None, grants=(), sources=(), citations
         if outcome == 'reply' and stale(connection, job, grants):
             # A reply may carry looked-up facts: a revoked or changed action defeats it, too.
             outcome, text = 'stop', Stop(FAILED, 'action controls changed before delivery')
-        elif outcome == 'reply' and sources and withdrawn(connection, sources):
-            # Nor may it carry evidence from a source deleted since retrieval.
-            outcome, text = 'stop', Stop(FAILED, 'knowledge source deleted before delivery')
+        elif outcome == 'reply' and versions and withdrawn(connection, versions):
+            # Nor may it carry evidence from a source deleted or expired since retrieval.
+            outcome, text = 'stop', Stop(FAILED, 'knowledge source deleted or expired before delivery')
         if outcome == 'stop':
             fail(connection, job, text.notice, text.error)
             # The control trigger pauses the conversation's remaining turns.
@@ -702,7 +707,7 @@ def run(connection, job):
         outcome, text = 'reply', str(clarification)
     except Stop as stop:
         outcome, text = 'stop', stop
-    finish(connection, job, outcome, text, list(turn.grants.values()), turn.sources(), turn.citations if outcome == 'reply' else ())
+    finish(connection, job, outcome, text, list(turn.grants.values()), turn.versions(), turn.citations if outcome == 'reply' else ())
 
 
 INTERRUPTED_INGEST = 'ingestion was interrupted (for example by a worker restart) and was not retried; upload the document again'
@@ -727,9 +732,11 @@ def settle(connection, job, error):
 
 def ingest(connection, job):
     """Parse, chunk and embed one candidate version outside any transaction, then activate it atomically."""
+    if not EMBEDDER:
+        return settle(connection, job, KNOWLEDGE)
     row = connection.execute("SELECT format,content FROM source_versions WHERE id=%s AND state='running'", (job[2],)).fetchone()
     if not row or row[1] is None:
-        return settle(connection, job, 'source deleted')
+        return settle(connection, job, 'source deleted or expired')
     try:
         pages = knowledge.parse(row[0], bytes(row[1]), lambda: renew(connection, job))
         passages = EMBEDDER.passages(pages, lambda: renew(connection, job))
@@ -746,11 +753,12 @@ def ingest(connection, job):
         time.sleep(1)
     with connection.transaction():
         source = connection.execute(
-            "SELECT s.id,s.deleted_at IS NULL,a.id,a.seq,v.seq FROM source_versions v JOIN knowledge_sources s ON s.id=v.source_id "
-            "LEFT JOIN source_versions a ON a.id=s.active_version_id WHERE v.id=%s FOR UPDATE OF s", (job[2],)).fetchone()
+            "SELECT s.id,s.deleted_at IS NULL,a.id,greatest(a.seq,s.expired_through),v.seq FROM source_versions v "
+            "JOIN knowledge_sources s ON s.id=v.source_id LEFT JOIN source_versions a ON a.id=s.active_version_id WHERE v.id=%s FOR UPDATE OF s",
+            (job[2],)).fetchone()
         renew(connection, job)
-        # A deleted source's versions are already 'deleted'; an older candidate finishing late never replaces a newer version.
-        activate = source[1] and not (source[3] is not None and source[3] > source[4])
+        # A deleted source never activates again; nor does a candidate older than the active version or than an expiry.
+        activate = source[1] and not (source[3] is not None and source[3] >= source[4])
         if activate:
             with connection.cursor() as cursor:
                 cursor.executemany("INSERT INTO source_chunks(business_id,source_id,version_id,ordinal,page,content,embedding) "
@@ -790,7 +798,8 @@ def ingestion():
     while True:
         try:
             with psycopg.connect(DATABASE, autocommit=True) as connection:
-                reindex(connection)
+                if EMBEDDER:
+                    reindex(connection)
                 while True:
                     # Interrupted ingestion fails visibly, never replays; the previous active version stays in use.
                     for expired in connection.execute(
@@ -825,7 +834,12 @@ def ingestion():
 
 # ponytail: untrusted documents are parsed in this process; a pathological file could stall ingestion or exhaust worker memory.
 # Move parsing to a subprocess with a timeout and memory limit if that is ever observed.
-EMBEDDER = knowledge.Embedder()
+# Knowledge is optional: without the model the worker still serves chat and lookups, while uploads and retrieval steps fail visibly.
+try:
+    EMBEDDER, KNOWLEDGE = knowledge.Embedder(), f'available: {knowledge.MODEL}@{knowledge.REVISION[:7]} on CPU'
+except knowledge.Unavailable as reason:
+    EMBEDDER, KNOWLEDGE = None, f'knowledge unavailable: {reason}'
+    print(KNOWLEDGE, flush=True)
 threading.Thread(target=ingestion, daemon=True).start()
 threading.Thread(target=heartbeat, daemon=True).start()
 while True:

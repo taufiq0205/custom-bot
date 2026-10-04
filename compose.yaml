@@ -49,8 +49,10 @@ services:
       interval: 5s
       timeout: 10s
       retries: 20
-  # Downloads the pinned embedding model once (about 135 MB) into the model volume, then only verifies it.
+  # Optional knowledge: `docker compose run --rm models` downloads the pinned embedding model once (about 135 MB) into the
+  # model volume and verifies it; then restart the worker. Without it, chat works and knowledge is reported unavailable.
   models:
+    profiles: [knowledge]
     build: worker
     command: [python, knowledge.py]
     volumes: [models:/models]
@@ -63,8 +65,8 @@ services:
       ACTION_CREDENTIAL_KEY: ${ACTION_CREDENTIAL_KEY:-}
     depends_on:
       migrate: {condition: service_completed_successfully}
-      models: {condition: service_completed_successfully}
-    # The internal network has no outbound access: embedding runs only from the verified cache.
+      models: {condition: service_completed_successfully, required: false}
+    # The internal network has no outbound access: embedding runs only from the verified cache, if installed.
     volumes: [models:/models:ro]
     networks: [internal]
     healthcheck:

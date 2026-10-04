@@ -188,7 +188,17 @@ async function loadKnowledge() {
       if(!confirm(`Delete ${s.ref}? Answers stop using every version of it at once, including in existing conversations.`))return;
       await request(`/api/businesses/${business.id}/sources/${encodeURIComponent(s.ref)}/delete`,{});await loadKnowledge();status_(`Source ${s.ref} deleted.`);
     }));
-    li.append(text,remove);return li;
+    const controls=[remove];
+    if(s.active) {
+      const expire=Object.assign(document.createElement('button'),{textContent:'Expire'});
+      expire.setAttribute('aria-label',`Expire source: ${s.ref}`);
+      expire.addEventListener('click',()=>run(async()=>{
+        if(!confirm(`Expire ${s.ref}? Answers stop using it at once, including in existing conversations, until you upload a replacement.`))return;
+        await request(`/api/businesses/${business.id}/sources/${encodeURIComponent(s.ref)}/expire`,{});await loadKnowledge();status_(`Source ${s.ref} expired.`);
+      }));
+      controls.unshift(expire);
+    }
+    li.append(text,...controls);return li;
   }):[Object.assign(document.createElement('li'),{textContent:'No knowledge sources yet.'})]));
   if(sources.some(pending))knowledgePoll=setTimeout(()=>loadKnowledge().catch(()=>{}),2000);
 }

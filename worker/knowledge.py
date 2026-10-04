@@ -1,7 +1,8 @@
-"""Local English embeddings and document parsing. No cloud embedding exists, so there is nothing to fall back to.
+"""Local English embeddings and document parsing. The model is optional: without it knowledge is unavailable, and nothing
+falls back to a cloud embedding.
 BAAI/bge-small-en-v1.5 at one pinned commit: the publisher's FP32 ONNX export on the CPU execution provider, CLS pooling and
 L2 normalization (1_Pooling/config.json and modules.json at that commit), the publisher's query instruction and plain passages.
-Run as a script (the Compose `models` service) to download the pinned files once into the model volume."""
+Run as a script (`docker compose run --rm models`) to download the pinned files once into the model volume."""
 import hashlib
 import io
 import json
@@ -64,12 +65,16 @@ class Unreadable(Exception):
     """The document has no usable text; its version fails visibly."""
 
 
+class Unavailable(Exception):
+    """The pinned model files are not all present and unchanged in the cache."""
+
+
 class Embedder:
     def __init__(self):
         for name in FILES:
             if not cached(name):
-                sys.exit(f'Embedding model file {name} is missing or changed in the model cache ({ROOT}). '
-                         'There is no cloud embedding fallback. Run `docker compose run --rm models` once with network access.')
+                raise Unavailable(f'embedding model file {name} is missing or changed in the model cache; there is no cloud embedding '
+                                  'fallback. Run `docker compose run --rm models` once with network access, then restart the worker')
         import numpy
         import onnxruntime
         from tokenizers import Tokenizer

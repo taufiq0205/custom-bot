@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { pool } from './config.js';
 import { REF } from './configuration.js';
 import { body, Failure, keys, uuid } from './memberships.js';
-const route=new RegExp(`^/api/businesses/(${uuid})/sources(?:/(${REF.source.slice(1,-1)})(/delete)?)?$`);
+const route=new RegExp(`^/api/businesses/(${uuid})/sources(?:/(${REF.source.slice(1,-1)})(?:/(delete|expire))?)?$`);
 // 20 MB. Uploads must declare their length, so an oversized one is refused before any byte is read.
 const MAX_DOCUMENT=20_000_000;
 const formats:Record<string,string>={pdf:'pdf',docx:'docx',txt:'txt',md:'md',markdown:'md'};
@@ -14,12 +14,12 @@ const owner=(client:PoolClient|typeof pool,business:string,user:string)=>client.
 export async function knowledge(req:IncomingMessage,path:string,user:{id:string},json:(status:number,value:unknown)=>void) {
   const match=path.match(route);
   if(!match)return false;
-  const [,business,ref,remove]=match;
+  const [,business,ref,control]=match;
   let client:PoolClient|undefined;
   try {
     if(req.method!==(ref?'POST':'GET'))throw new Failure(404,'Not found');
     let upload:{document:string,format:string,content:Buffer}|undefined;
-    if(ref&&!remove) {
+    if(ref&&!control) {
       const document=new URL(req.url??'',`http://x`).searchParams.get('document')??'';
       const format=formats[document.split('.').at(-1)!.toLowerCase()];
       if(!format||document.length>200||/[\u0000-\u001f/\\]/.test(document))throw new Failure(400,'Provide ?document=<file name> ending in .pdf, .docx, .txt, .md or .markdown (at most 200 characters)');
@@ -33,7 +33,7 @@ export async function knowledge(req:IncomingMessage,path:string,user:{id:string}
       for await(const chunk of req)chunks.push(chunk);
       upload={document,format,content:Buffer.concat(chunks)};
     }
-    const input=remove?await body(req):null;
+    const input=control?await body(req):null;
     if(input)keys(input,[]);
     client=await pool.connect();
     await client.query('BEGIN');
@@ -54,7 +54,17 @@ export async function knowledge(req:IncomingMessage,path:string,user:{id:string}
       result={ref,version:{id:version,document:upload.document,state:'queued'},
         message:'Queued for ingestion. It is used for answers only once it is complete; until then any previous version stays in use.'};
       status=202;
-    } else if(remove) {
+    } else if(control==='expire') {
+      // Like deletion for answers, but the source stays listed; only a new upload makes it usable again.
+      // The row lock waits for any turn rechecking this source; no candidate uploaded before now can activate later.
+      const expired=await client.query(`UPDATE knowledge_sources s SET expired_at=clock_timestamp(),active_version_id=NULL,
+        expired_through=(SELECT max(seq) FROM source_versions WHERE source_id=s.id)
+        WHERE business_id=$1 AND ref=$2 AND deleted_at IS NULL AND active_version_id IS NOT NULL RETURNING id,expired_at`,[business,ref]);
+      if(!expired.rowCount)throw new Failure(404,'No active version of this source to expire');
+      await client.query("UPDATE source_versions SET state='expired',content=NULL WHERE source_id=$1 AND state IN ('active','queued','running')",[expired.rows[0].id]);
+      await client.query('DELETE FROM source_chunks WHERE source_id=$1',[expired.rows[0].id]);
+      result={ref,expired_at:expired.rows[0].expired_at};
+    } else if(control==='delete') {
       // The row lock waits for any turn rechecking this source, and blocks a late activation; every version and passage goes now.
       const deleted=await client.query('UPDATE knowledge_sources SET deleted_at=clock_timestamp() WHERE business_id=$1 AND ref=$2 AND deleted_at IS NULL RETURNING id',[business,ref]);
       if(!deleted.rowCount)throw new Failure(404,'Source not found');
@@ -62,13 +72,15 @@ export async function knowledge(req:IncomingMessage,path:string,user:{id:string}
       await client.query('DELETE FROM source_chunks WHERE source_id=$1',[deleted.rows[0].id]);
       result={ref,deleted:true};
     } else {
-      result=(await client.query(`SELECT s.ref,
+      result=(await client.query(`SELECT s.ref,s.expired_at,l.seq<=s.expired_through AS expired,
         CASE WHEN a.id IS NOT NULL THEN json_build_object('document',a.document,'format',a.format,'passages',a.passages,'activated_at',a.finished_at) END AS active,
         json_build_object('id',l.id,'document',l.document,'state',l.state,'error',l.error,'uploaded_at',l.created_at,'finished_at',l.finished_at) AS latest
         FROM knowledge_sources s LEFT JOIN source_versions a ON a.id=s.active_version_id
         CROSS JOIN LATERAL (SELECT * FROM source_versions WHERE source_id=s.id ORDER BY seq DESC LIMIT 1) l
-        WHERE s.business_id=$1 AND s.deleted_at IS NULL ORDER BY s.ref`,[business])).rows.map(s=>({...s,
-        warning:s.latest.state!=='failed'?null:s.active?`The latest upload (${s.latest.document}) failed: ${s.latest.error}. Answers still use ${s.active.document}.`
+        WHERE s.business_id=$1 AND s.deleted_at IS NULL ORDER BY s.ref`,[business])).rows.map(({expired,...s})=>({...s,
+        // No upload since the expiry: say so, whatever happened to earlier uploads.
+        warning:expired?`Expired ${new Date(s.expired_at).toISOString()}: not used for answers. Upload a replacement to use this source again.`
+          :s.latest.state!=='failed'?null:s.active?`The latest upload (${s.latest.document}) failed: ${s.latest.error}. Answers still use ${s.active.document}.`
           :`The upload (${s.latest.document}) failed: ${s.latest.error}. This source has no usable version.`}));
     }
     await client.query('COMMIT');json(status,result);return true;
