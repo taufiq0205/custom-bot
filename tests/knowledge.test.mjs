@@ -3,33 +3,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { chromium } from 'playwright';
-import { action, agent, base, business, calls, compose, config, docx, handoff, ingested, invitationToken, operator, owned, pdf, publish, ready,
-  received, reply, script, sources, sql, start, upload, wait } from './helpers.mjs';
+import { action, active, agent, base, business, calls, cite, compose, config, delivered, docx, grounded, handedOff, handoff, ingested, invitationToken,
+  last, operator, owned, pdf, publish, ready, received, reply, script, sources, sql, start, upload, wait } from './helpers.mjs';
 
 // One team for the whole file; its sign-ups happen first (Better Auth allows 3 sign-ups per 10 s, and a browser cannot wait out a 429).
 let shared;
 const team=()=>shared??=(async()=>({owner:await operator('knowledge-owner'),support:await operator('knowledge-support'),outsider:await operator('knowledge-outsider')}))();
 const text=s=>Buffer.from(s);
-// Retrieval of `retrieve`, then one final agent answering from `assigned`.
-function grounded(key,{sources,retrieve=sources.map(s=>s.id),assigned=retrieve,actions,agentActions}) {
-  return config({sources,agents:[{...agent(`${key}.answer`),...(assigned?{sources:assigned}:{}),...(agentActions?{actions:agentActions}:{})}],actions,
-    steps:[{id:'retrieve',type:'retrieval',sources:retrieve},{id:'answer',type:'agent',agent:'answer',final:true},handoff],
-    links:[['retrieve','next','answer'],['answer','unsupported','support']]});
-}
-const cite=(answer,...citations)=>reply({outcome:'reply',reply:answer,citations});
-const last=async key=>received((await calls(key)).at(-1));
-const delivered=turn=>turn.replies.filter(m=>m.author==='assistant');
-async function active(b,ref,document) {
-  const source=await ingested(b,ref);
-  assert.equal(source.latest.state,'active',JSON.stringify(source));
-  assert.equal(source.active.document,document);
-  return source;
-}
-const handedOff=turn=>{
-  assert.equal(delivered(turn).length,0);
-  assert.match(turn.replies[0].text,/could not be answered automatically.*passed to support/);
-  assert.equal(turn.conversation.control_state,'waiting-for-support');
-};
 
 test('browser: an Owner uploads, sees a failed replacement warning while the previous version stays active, expires and deletes; a Customer sees cited documents; Support has no Knowledge view',async()=>{
   const t=await team();
@@ -55,7 +35,7 @@ test('browser: an Owner uploads, sees a failed replacement warning while the pre
       await page.getByRole('button',{name:'Knowledge',exact:true}).click();
       await page.getByRole('heading',{name:'knowledge-browser Business knowledge sources'}).waitFor();
       const send=async(name,buffer)=>{
-        await page.getByLabel('Source ID').fill(ref);
+        await page.locator('#knowledge-upload').getByLabel('Source ID').fill(ref);
         await page.getByLabel('Document').setInputFiles({name,mimeType:'application/octet-stream',buffer});
         await page.getByRole('button',{name:'Upload document'}).click();
         await page.getByText(`${name} queued for ingestion. Answers use it only once it is complete.`).waitFor();

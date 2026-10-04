@@ -12,6 +12,7 @@ import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
+from html.parser import HTMLParser
 from pathlib import Path
 
 MODEL, REVISION = 'BAAI/bge-small-en-v1.5', '5c38ec7c405ec4b44b94cc5a9bb96e735b38267a'
@@ -192,6 +193,41 @@ def parse(fmt, data, tick=lambda: None):
     if not text:
         raise Unreadable('the document has no readable text')
     return [(None, text)]
+
+
+class Page(HTMLParser):
+    """Readable text and link targets of one HTML page. Scripts, styles and other non-text elements are dropped; block
+    elements break lines, so passages keep the page's structure."""
+    HIDDEN = {'script', 'style', 'noscript', 'template', 'svg', 'iframe', 'object'}
+    BLOCK = {'address', 'article', 'aside', 'blockquote', 'br', 'dd', 'details', 'div', 'dl', 'dt', 'figcaption', 'figure', 'footer',
+             'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'summary',
+             'table', 'td', 'th', 'title', 'tr', 'ul'}
+
+    def __init__(self, data):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.links, self.hidden = [], [], 0
+        self.feed(data)
+        self.close()
+        self.text = clean('\n'.join(' '.join(line.split()) for line in ''.join(self.parts).split('\n')))
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.HIDDEN:
+            self.hidden += 1
+        elif tag == 'a' and (href := dict(attrs).get('href')):
+            self.links.append(href)
+        if tag in self.BLOCK:
+            self.parts.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in self.HIDDEN:
+            self.hidden = max(0, self.hidden - 1)
+        if tag in self.BLOCK:
+            self.parts.append('\n')
+
+    def handle_data(self, data):
+        if not self.hidden:
+            # HTML whitespace, line breaks included, separates words only; block elements break lines.
+            self.parts.append(re.sub(r'\s+', ' ', data))
 
 
 if __name__ == '__main__':

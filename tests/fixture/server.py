@@ -2,6 +2,8 @@
 It answers as api.deepseek.com and dashscope-intl.aliyuncs.com on the test network only. A Qwen request's key is the
 system prompt's fixture key plus "@qwen", so each provider has its own script queue.
 Tests script responses per key on the plain control port and read back what the worker sent.
+Website pages are persistent per key (a crawl may run again at any time): /site sets a key's pages, served on every host under
+/<key>/..., and its robots.txt lines, all merged into one "User-agent: *" group at each host's /robots.txt.
 cert.pem/key.pem are a self-signed test-only CA for *.fixture.test and those two names; they protect nothing."""
 import json
 import re
@@ -13,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
 scripts, log, lock = {}, [], threading.Lock()
+sites, robots = {}, {}
 
 
 def take(key):
@@ -78,7 +81,32 @@ class Fixture(BaseHTTPRequestHandler):
             entry['closed'] = round(time.time() - entry['at'], 2)
 
     def do_GET(self):
-        self.respond(self.path.split('/')[1], 'http', None)
+        key = self.path.split('/')[1]
+        if self.path == '/robots.txt' or key in sites:
+            return self.page(key)
+        self.respond(key, 'http', None)
+
+    def page(self, key):
+        host = self.headers.get('host', '').split(':')[0]
+        entry = {'key': key, 'kind': 'site', 'host': host, 'path': self.path, 'at': time.time(), 'closed': None,
+                 'agent': self.headers.get('user-agent')}
+        with lock:
+            log.append(entry)
+            if self.path == '/robots.txt':
+                spec = robots[host] if host in robots else {
+                    'type': 'text/plain', 'body': '\n'.join(['User-agent: *', *(l for site in sites.values() for l in site.get('robots', []))])}
+            else:
+                spec = sites[key]['pages'].get(self.path, {'status': 404, 'body': 'not found'})
+        if not self.wait(spec.get('delay', 0), entry):
+            return
+        data = spec.get('body', '').encode(spec.get('encoding', 'utf-8'))
+        self.send_response(spec.get('status', 200))
+        if 'location' in spec:
+            self.send_header('location', spec['location'])
+        self.send_header('content-type', spec.get('type', 'text/html; charset=utf-8'))
+        self.send_header('content-length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get('content-length', 0))) or b'null')
@@ -93,6 +121,14 @@ class Fixture(BaseHTTPRequestHandler):
         with lock:
             if self.path == '/script':
                 scripts[body['key']] = list(body['responses'])
+                result = {}
+            elif self.path == '/site':
+                sites[body['key']] = {'pages': body['pages'], 'robots': body.get('robots', [])}
+                result = {}
+            elif self.path == '/robots':
+                # A host's robots.txt answers with this status (and location) instead; None restores it.
+                robots.pop(body['host'], None) if body['status'] is None else robots.update(
+                    {body['host']: {'status': body['status'], **({'location': body['location']} if body.get('location') else {})}})
                 result = {}
             elif self.path == '/log':
                 result = [e for e in log if e['key'] == body['key']]

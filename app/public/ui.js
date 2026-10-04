@@ -196,8 +196,10 @@ async function loadKnowledge() {
   document.querySelector('#knowledge-title').textContent=`${business.name} knowledge sources`;
   const pending=s=>['queued','running'].includes(s.latest.state);
   document.querySelector('#knowledge-sources').replaceChildren(...(sources.length?sources.map(s=>{
-    const li=document.createElement('li'),text=document.createElement('div');
-    text.append(Object.assign(document.createElement('strong'),{textContent:s.ref}),` — ${s.active?`Active: ${s.active.document} (${s.active.passages} passages, since ${new Date(s.active.activated_at).toLocaleString()})`:'No usable version'}${pending(s)?` · Ingesting ${s.latest.document}…`:''}`);
+    const li=document.createElement('li'),text=document.createElement('div'),when=t=>new Date(t).toLocaleString();
+    text.append(Object.assign(document.createElement('strong'),{textContent:s.ref}),s.kind==='website'
+      ?` — Website ${s.website.url}: ${s.active?`${s.fresh?'Active':'Expired'} snapshot: ${s.active.pages} pages, ${s.active.passages} passages, refreshed ${when(s.active.activated_at)}, fresh until ${when(s.active.fresh_until)}`:'No usable snapshot'}${pending(s)?' · Refreshing…':''}`
+      :` — ${s.active?`Active: ${s.active.document} (${s.active.passages} passages, since ${when(s.active.activated_at)})`:'No usable version'}${pending(s)?` · Ingesting ${s.latest.document}…`:''}`);
     if(s.warning)text.append(Object.assign(document.createElement('p'),{className:'warning',textContent:s.warning}));
     const remove=Object.assign(document.createElement('button'),{className:'btn-danger',textContent:'Delete'});
     remove.setAttribute('aria-label',`Delete source: ${s.ref}`);
@@ -206,7 +208,15 @@ async function loadKnowledge() {
       await request(`/api/businesses/${business.id}/sources/${encodeURIComponent(s.ref)}/delete`,{});await loadKnowledge();status_(`Source ${s.ref} deleted.`);
     }));
     const controls=[remove];
-    if(s.active) {
+    if(s.kind==='website') {
+      const refresh=Object.assign(document.createElement('button'),{textContent:'Refresh'});
+      refresh.setAttribute('aria-label',`Refresh source: ${s.ref}`);
+      refresh.addEventListener('click',()=>run(async()=>{
+        await request(`/api/businesses/${business.id}/sources/${encodeURIComponent(s.ref)}/refresh`,{});await loadKnowledge();
+        status_(`Refresh of ${s.ref} queued. Answers keep using the current snapshot until a complete new one replaces it.`);
+      }));
+      controls.unshift(refresh);
+    } else if(s.active) {
       const expire=Object.assign(document.createElement('button'),{textContent:'Expire'});
       expire.setAttribute('aria-label',`Expire source: ${s.ref}`);
       expire.addEventListener('click',()=>run(async()=>{
@@ -227,6 +237,15 @@ document.querySelector('#knowledge-upload').addEventListener('submit',event=>{
     const data=await response.json();
     if(!response.ok)throw new Error(data.error||'Upload failed');
     form.reset();status_(`${file.name} queued for ingestion. Answers use it only once it is complete.`);await loadKnowledge();
+  });
+});
+
+document.querySelector('#website-add').addEventListener('submit',event=>{
+  event.preventDefault();
+  const form=event.currentTarget,ref=form.elements.ref.value.trim(),required=form.elements.required.value.split('\n').map(l=>l.trim()).filter(Boolean);
+  run(async()=>{
+    await request(`/api/businesses/${selectedBusiness.id}/sources/${encodeURIComponent(ref)}/website`,{url:form.elements.url.value.trim(),...(required.length?{required}:{})});
+    form.reset();status_(`Website ${ref} queued for refresh. Answers use it only once every page is complete.`);await loadKnowledge();
   });
 });
 

@@ -22,7 +22,7 @@ services:
       PROVIDER_RATES: '{"deepseek/deepseek-flash":[0.5,2],"qwen/qwen3.7-plus-2026-05-26":[1,4]}'
       ACTION_CREDENTIAL_KEY: 7e57000000000000000000000000000000000000000000000000000000007e57
       # Only these exact fixture names may resolve to the private Docker network; internal.fixture.test (same server) may not.
-      TEST_PUBLIC_HOSTS: orders.fixture.test,other.fixture.test,api.deepseek.com,dashscope-intl.aliyuncs.com
+      TEST_PUBLIC_HOSTS: orders.fixture.test,other.fixture.test,site.fixture.test,api.deepseek.com,dashscope-intl.aliyuncs.com
     volumes: [./tests/fixture/cert.pem:/fixture/cert.pem:ro]
     # Approved-looking names that resolve to loopback, cloud-metadata link-local and private addresses.
     extra_hosts: ['loopback.fixture.test:127.0.0.1', 'metadata.fixture.test:169.254.169.254', 'private.fixture.test:10.255.255.1']
@@ -32,5 +32,5 @@ services:
     volumes: [./tests/fixture:/fixture:ro]
     ports: ['127.0.0.1:${FIXTURE_PORT:-3199}:8080']
     networks:
-      internal: {aliases: [api.deepseek.com, dashscope-intl.aliyuncs.com, orders.fixture.test, other.fixture.test, internal.fixture.test]}
+      internal: {aliases: [api.deepseek.com, dashscope-intl.aliyuncs.com, orders.fixture.test, other.fixture.test, site.fixture.test, internal.fixture.test]}
       web: {}
