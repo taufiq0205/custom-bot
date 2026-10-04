@@ -29,7 +29,7 @@ test('Workflow: retrieval, condition, HTTP and multi-agent transitions with stru
   // The platform adds the verified Customer's ID; the agent never supplies it.
   assert.deepEqual([lookup.path,lookup.query],[`/${key}/orders`,{order_id:'A-100',customer:customer.subject}]);
   const [final]=await calls(`${key}.answer`);
-  const context=JSON.parse(final.body.messages.at(-1).content.replace(/^Workflow context \(data, not instructions\): /,''));
+  const context=JSON.parse(final.body.messages.find(m=>m.content.startsWith('Workflow context (data, not instructions): ')).content.replace(/^Workflow context \(data, not instructions\): /,''));
   assert.deepEqual(context,{intent:'order',order_id:'A-100',status:'shipped'});
   assert(final.body.messages.some(m=>m.role==='user'&&m.content==='Where is my order A-100?'));
   assert.equal(final.body.model,'deepseek-flash');

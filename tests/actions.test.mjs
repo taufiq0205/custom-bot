@@ -80,7 +80,7 @@ test('Actions: an owned order succeeds through both paths with the Business cred
     assert.equal(request.headers['x-api-key'],b.secret,shape);
     // The final agent sees only declared result fields.
     const last=(await calls(shape==='explicit'?`${key}.answer`:`${key}.helper`)).at(-1);
-    assert.match(last.body.messages.at(-1).content,/"status": ?"shipped"/,shape);
+    assert.match(last.body.messages.find(m=>m.content.startsWith('Workflow context (data, not instructions): ')).content,/"status": ?"shipped"/,shape);
     assert.doesNotMatch(JSON.stringify(last.body),/undeclared|customer_id/,shape);
     // Support context: a timestamped historical observation of the declared fields.
     const {lookups}=(await inbox(b,customer)).data;

@@ -320,6 +320,14 @@ test('outage fallback removes intermediate agent context derived from preference
  }finally{sql('ALTER TABLE unavailable_consents RENAME TO memory_consents');}
 });
 
+test('a blank extraction reply, which DeepSeek documents as occasional, gets the one permitted retry',async()=>{
+ const {key,c}=await setup('memory-blank');await enable(c);await script(key,[{...answer,delay:0.2}]);
+ const text='Please call me Ada',msg=await c.send(text);await inflight(key,1);await script(key,[{content:' '},extracted(msg,'preferred_name','Ada',text)]);await c.settle(msg);
+ const m=await settled(c);assert.equal(m.extraction.status,'completed',JSON.stringify(m.extraction));
+ assert.deepEqual(m.preferences.map(p=>[p.kind,p.value]),[['preferred_name','Ada']]);
+ assert.equal((await calls(key)).length,3);
+});
+
 test('alternative preferred names require clarification even with a literally matching provider value',async()=>{
  const {key,c}=await setup('memory-name-choice');await enable(c);await script(key,[{...answer,delay:0.2}]);
  const text='Please call me Ada or Grace',msg=await c.send(text);await inflight(key,1);await script(key,[extracted(msg,'preferred_name','Ada or Grace',text)]);await c.settle(msg);
