@@ -125,6 +125,8 @@ The model reasons first (its `reasoning_content` is present), and when the reque
 - All 24 provider attempts succeeded on the first try: 12 generation and 12 extraction, `deepseek-flash`, 6,119 input and 3,784 output tokens, about USD 0.0032 at USD 0.15 / 0.60 per million (estimated, cache discounts ignored).
 - The diagnostic replays (30 calls) are not included; only their completion tokens were recorded.
 
+**Regression.** `caffeinate -i npm test` on `fix-deepseek-blank-replies` (2026-10-04, 22.9 min): **84/84 pass**, 0 failed, cancelled or skipped.
+
 ## Not established by this slice
 
 - **The permission recheck just before delivery** (`finish()`) is defense in depth. No test reaches the gap between accepting the final output and delivering it, so no test or mutant proves it. Late-result acceptance and later transfers are proven (Races test and mutants).
