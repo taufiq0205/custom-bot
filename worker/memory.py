@@ -168,6 +168,9 @@ def extract(connection, job, state, runtime):
             choice = data['choices'][0]
             if choice.get('finish_reason') != 'stop':
                 raise from_worker.Rejected('incomplete extraction output')
+            # DeepSeek documents that JSON mode occasionally returns empty content: that gets the one permitted retry or fallback.
+            if isinstance(choice['message']['content'], str) and not choice['message']['content'].strip():
+                raise from_worker.Transient('empty provider output')
             output = from_worker.strict(choice['message']['content'])
             permits[(provider, 'extraction')] = revision
         except from_worker.Transient:

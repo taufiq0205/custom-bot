@@ -95,6 +95,38 @@ Redaction with the real key, counted without printing it (all `0`): `docker comp
 
 Qwen leg: **blocked until a Singapore/International `DASHSCOPE_API_KEY` exists.** Until then, real Qwen endpoint, key and model access, and acceptance of `enable_thinking: false`, are unestablished. Without that key, a configured fallback cannot run: a transient DeepSeek failure hands off with `qwen fallback unavailable: DASHSCOPE_API_KEY not set` (Keyless test). So configure no `fallback` until the key exists.
 
+## Blank JSON-mode replies (fixed after #23, 2026-10-04)
+
+**Finding.** In #23's real run, DeepSeek answered "I have diabetes. Remember my medical diagnosis." with whitespace only (`finish_reason: stop`). The reply contract rejected it as invalid output, without a retry, and the conversation went to support. [DeepSeek's JSON Output guide](https://api-docs.deepseek.com/guides/json_mode) states that the API "may occasionally return empty content" and suggests adjusting the prompt.
+
+**Diagnosis.** The failing request was replayed from the database against real DeepSeek (`deepseek-flash`), 5 times per variant:
+
+| Variant | Valid replies | Completion tokens |
+| --- | --- | --- |
+| A: current request (it ends with the workflow-context data message) | 1 of 5; 4 blank | 108–180 |
+| B: example JSON output added to the contract | 5 of 5 | 259–392 |
+| C: a closing instruction after the data (system role) | 5 of 5 | 98–213 |
+| C′: the same closing instruction as a user message | 5 of 5 | 113–131 |
+| D: text mode instead of JSON mode | 5 of 5 | 207–384 |
+
+The model reasons first (its `reasoning_content` is present), and when the request ends on data with no closing instruction, JSON mode often emits nothing.
+
+**Fix (`worker/worker.py`, `worker/memory.py`).**
+- **Closing instruction:** every agent request now ends with the user message "Answer now with the one JSON object described in your instructions." This is C′, chosen because it costs almost nothing in tokens and because a mid-conversation system message may be rejected by Qwen's compatible API.
+- **Blank output is transient:** for replies and for memory extraction, so the documented residual case gets the one permitted retry or Qwen fallback within the existing budget. Two blank replies still hand off, with no third attempt.
+
+**Tests, written first and failing before the fix.**
+- **Providers:** a blank reply recovers on the same model and through the Qwen fallback, with attempts recorded as `empty provider output` and then `succeeded`. Blank twice hands off after exactly 2 calls. The request ends with the closing instruction, right after the workflow context.
+- **Memory:** a blank extraction reply is retried once, and the preference is saved.
+- Two existing assertions that read the workflow context as the last message now find it by its prefix.
+
+**Real rerun.** Three complete #23 memory flows ran in connected mode against real DeepSeek: opt-in, name, language, style, correction, then the medical statement. Conversations: `83bdfcbf-eeef-43e4-b9c7-0b72bb95b610`, `7ceaa56a-0136-4803-8bb5-4e740c81bfdf`, `d8426529-f821-4a3b-9b8d-8546ac26ed67`.
+- Every check passed in all 3 runs, and the medical-statement turn completed each time.
+- All 24 provider attempts succeeded on the first try: 12 generation and 12 extraction, `deepseek-flash`, 6,119 input and 3,784 output tokens, about USD 0.0032 at USD 0.15 / 0.60 per million (estimated, cache discounts ignored).
+- The diagnostic replays (30 calls) are not included; only their completion tokens were recorded.
+
+**Regression.** `caffeinate -i npm test` on `fix-deepseek-blank-replies` (2026-10-04, 22.9 min): **84/84 pass**, 0 failed, cancelled or skipped.
+
 ## Not established by this slice
 
 - **The permission recheck just before delivery** (`finish()`) is defense in depth. No test reaches the gap between accepting the final output and delivering it, so no test or mutant proves it. Late-result acceptance and later transfers are proven (Races test and mutants).
