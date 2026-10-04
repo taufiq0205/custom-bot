@@ -54,7 +54,9 @@ The fixture runs above establish no real provider access, hosted deployment, pro
 
 ## Real integration run
 
-**Overall: FAIL — communication-style extraction did not save. Push and merge remain pending explicit user confirmation.** No implementation change or fixture response was used to make this run pass.
+**Overall, after the fix below: PASS for every memory check against real DeepSeek.** The first run (recorded first, unchanged) failed communication-style extraction; its cause, fix and rerun follow it. One generation-path finding outside this slice is recorded with the rerun. No fixture response was used to make a real run pass.
+
+### First run (implementation `06ebd64`)
 
 2026-10-04, isolated worktree `/tmp/custom-bot-issue23`, implementation commit `06ebd64`, Compose project `custom-bot-issue23`. The successful connected startup used:
 
@@ -80,7 +82,7 @@ Primary run: 15:49:10–15:49:22 UTC (23:49 MYT). Business `a2b7aafc-8ca5-4b63-b
 
 The style failure's exact save/validation cause remains undiagnosed: provider transport success is not proof of accepted preferences. Synthetic coverage does not establish general model quality. The sensitive assertion was checked against the actual pre-sensitive snapshot; an initial harness assertion incorrectly expected three preferences despite the failed style save and was corrected without another provider call.
 
-### Measured usage and estimated cost
+### Measured usage and estimated cost (first run)
 
 Each row comes from the isolated database's `execution_attempts` for this Business. All eight provider attempts below succeeded at the transport/response stage; style extraction still failed afterward. Tokens are provider-reported prompt/completion usage. Rates supplied through `PROVIDER_RATES` were USD **0.15 / 0.60 per million input/output tokens**, the documented Sunday off-peak rates. Estimates treat all input as cache misses, ignore cache discounts, and are **not measured billed charges**.
 
@@ -100,3 +102,40 @@ Primary totals: **1,975 input + 1,441 output tokens; USD 0.00116085 estimated**.
 Earlier exploratory run (15:39–15:43 UTC): opt-in/name/correction worked; language extraction had a transient network failure and was discarded, subsequent style service failed and the sensitive message stayed under human control. Four measured responses reported 891 input + 403 output tokens, estimated USD 0.00037545. One failed extraction returned no served-model/usage data, so its billed cost is unknown. The recorded attempt spanned approximately 227 seconds; its authority had expired and no language preference was accepted. That anomaly was not repaired or claimed as passing. An exploratory harness provenance assertion expected `customer` instead of the actual `customer-correction`; it was corrected before the primary run. Recorded measured estimates across both runs total **USD 0.00153630**, excluding unknown failed-call billing.
 
 **Qwen: PENDING.** `DASHSCOPE_API_KEY` is absent; no Qwen account request, fallback, or verification was attempted. The broader 81-group fixture suite remains the prior synthetic result; this real integration failure is an additional unresolved gate.
+
+### Style failure: cause, fix and rerun
+
+**Cause.** The failed style extraction's exact request was rebuilt from the run's database and replayed three times against real DeepSeek from the connected worker; every reply was identical in shape:
+`{"kind":"communication_style","value":"brief replies","quote":"I prefer brief replies"}` alongside the already-saved name and language. Validation required the value to equal the literal capture `brief`, raised `preference not explicitly confirmed`, and the worker's catch-all recorded that rejection as the generic `preferences could not be saved`. Name and language items in the same reply were valid. The fixture tests had always scripted the bare captured value, so they never produced this shape.
+
+**Fix (`worker/memory.py`).**
+- A model value is accepted when it equals the literal capture or the rest of the Customer's own statement from that capture (`brief replies` for "I prefer brief replies"). The stored value is always the platform's literal capture (`brief`), never the model's text; any other wording, such as `detailed replies always`, is still rejected.
+- A failed extraction records its value-free reason (for example `preference not explicitly confirmed`) instead of the generic text; unexpected errors stay generic. The Customer notice is unchanged.
+
+**Regression test, written first.** The test `a value repeating the rest of the Customer statement…` in `tests/memory.test.mjs` scripts the recorded real output: three statements, then an extraction returning all three preferences with `brief replies`. It failed before the fix with the same `failed` status, and passes after it. It also checks that wording beyond the Customer's statement fails, with `preference not explicitly confirmed` recorded, and that the saved style stays `brief`. `node --test tests/memory.test.mjs`: **20/20 pass** (2026-10-04). The full suite was not rerun for this change, which is confined to extraction validation and its failure reason.
+
+**Real rerun (2026-10-04 16:17 UTC, this checkout, `docker compose -f compose.yaml -f compose.connected.yaml up --build -d --wait --remove-orphans`, local mode, no test overlay or fixture).** It used the same harness and synthetic statements as the first run. Business `dbcbbf1b-4856-42b3-b78b-65e7160b3f20`, conversation `abd7b09c-7394-456f-af2b-46c701e82552`; every response reported served model `deepseek-flash`.
+
+| Check | Observed result | Pass/fail |
+| --- | --- | --- |
+| Opt-in | Disclosure version 1 accepted; enabled | PASS |
+| Name: `Please call me Ada` | `preferred_name=Ada`, extraction provenance and source message | PASS |
+| Language: `I prefer Malay` | `language=Malay` | PASS |
+| Style: `I prefer brief replies` | `communication_style=brief`, saved with name and language from the same extraction | **PASS** (failed before the fix) |
+| Correction | Ada changed to Grace, `customer-correction` provenance | PASS |
+| Sensitive: `I have diabetes. Remember my medical diagnosis.` | Final memory unchanged (`Grace`, `Malay`, `brief`); no medical value. The turn itself failed safely, so extraction did not run; see the finding below. | PASS for memory |
+| Sensitive extraction, separate check | Business `99b3c293-0a10-40ec-b495-a3c8dfe0b5f3`, fresh opted-in Customer: the turn completed with a refusal to save health information; extraction completed and stored nothing | PASS |
+
+**Generation-path finding (outside this slice).** In the rerun, the sensitive statement's reply failed with `invalid provider output` and the conversation went to support (`automation-failure`), as the first run's exploratory pass also saw. The reply request was rebuilt and replayed five times: four returned only whitespace in JSON mode (`finish_reason: stop`) and one returned a valid refusal. Empty content is rejected as invalid and not retried, so the outcome is a safe, visible handoff, with no stored or claimed sensitive value. This is the #28 reply path and is left for a separate decision, for example treating empty JSON-mode content as a transient failure that gets the one permitted retry or Qwen fallback.
+
+**Rerun usage, estimated** at the first run's rates (USD 0.15 / 0.60 per million input/output tokens, cache discounts ignored, not billed charges):
+
+| Run | Input tokens | Output tokens | Estimated USD |
+| --- | ---: | ---: | ---: |
+| Rerun, 4 generations + 3 extractions (the failed turn's generation included) | 1,698 | 1,141 | 0.00093930 |
+| Separate sensitive check, 1 generation + 1 extraction | 401 | 698 | 0.00047895 |
+| Diagnostic replays of the failed style extraction (3 direct calls) | 909 | 962 | 0.00071355 |
+
+Five diagnostic replays of the sensitive reply were also made directly; their usage was not recorded.
+
+**Qwen: still PENDING** until `DASHSCOPE_API_KEY` exists.

@@ -326,3 +326,21 @@ test('alternative preferred names require clarification even with a literally ma
  const m=await settled(c);assert.deepEqual(m.preferences,[]);assert.equal(m.extraction.status,'completed');
  assert.equal((await c.read()).messages.some(m=>/Please clarify which service preference/.test(m.text)),true);
 });
+
+test('a value repeating the rest of the Customer statement ("brief replies", as real DeepSeek returns) stores the literal value with earlier preferences; anything else fails with its reason',async()=>{
+ const {key,c}=await setup('memory-real-shape');await enable(c);
+ let n=0;
+ const turn=async(text,output)=>{await script(key,[{...answer,delay:0.2}]);const msg=await c.send(text);await inflight(key,++n);await script(key,[output(msg)]);n++;await c.settle(msg);return {msg,m:await settled(c)};};
+ const item=(m,kind,value,quote)=>({kind,value,source_message:m.id,quote});
+ const ada=await turn('Please call me Ada',m=>extracted(m,'preferred_name','Ada','Please call me Ada'));
+ const malay=await turn('I prefer Malay',m=>extracted(m,'language','Malay','I prefer Malay'));
+ // The recorded real output: every eligible statement again, newest first, with the style value as the Customer phrased it.
+ const style=await turn('I prefer brief replies',m=>reply({preferences:[item(m,'communication_style','brief replies','I prefer brief replies'),
+  item(malay.msg,'language','Malay','I prefer Malay'),item(ada.msg,'preferred_name','Ada','Please call me Ada')],clarify:false}));
+ assert.equal(style.m.extraction.status,'completed',JSON.stringify(style.m.extraction));
+ assert.deepEqual(style.m.preferences.map(p=>[p.kind,p.value]).sort(),[['communication_style','brief'],['language','Malay'],['preferred_name','Ada']]);
+ // Words the Customer did not say are still refused, and the value-free reason is recorded instead of a generic save failure.
+ const extra=await turn('I prefer detailed replies',m=>extracted(m,'communication_style','detailed replies always','I prefer detailed replies'));
+ assert.deepEqual([extra.m.extraction.status,extra.m.extraction.error],['failed','preference not explicitly confirmed']);
+ assert.equal(extra.m.preferences.find(p=>p.kind==='communication_style').value,'brief');
+});

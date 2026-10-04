@@ -202,10 +202,13 @@ def extract(connection, job, state, runtime):
         explicit = PATTERNS[kind].fullmatch(quote)
         # An earlier statement cannot defeat a newer explicit statement, even if the model selects the older one.
         newer = next((str(i) for i, t, _ in sources if PATTERNS[kind].fullmatch(t.strip())), None)
-        if not explicit or explicit[1].strip().casefold() != value.strip().casefold() or newer != source:
+        # The model may give the literal value or the rest of the Customer's statement from it ("brief replies", as DeepSeek
+        # does); either way the stored value is the platform's literal capture, never the model's text.
+        said = {explicit[1].strip().casefold(), quote[explicit.start(1):].strip().rstrip('.!').strip().casefold()} if explicit else set()
+        if value.strip().casefold() not in said or not valid(kind, explicit[1]) or newer != source:
             raise from_worker.Rejected('preference not explicitly confirmed')
         seen.add(kind)
-        validated.append((kind, value.strip(), source, source_map[source][1]))
+        validated.append((kind, explicit[1].strip(), source, source_map[source][1]))
     with connection.transaction():
         if not authorized(connection, job, state) or from_worker.lapsed(connection, job[1], permits):
             raise from_worker.Lost()
@@ -254,10 +257,12 @@ def loop(runtime):
                         extract(connection, job, state, runtime)
                     except runtime.Lost:
                         connection.execute("UPDATE memory_extractions SET status='discarded',error='authority changed' WHERE job_id=%s", (job[0],))
-                    except Exception:
-                        # Value-free failure; a failed save is visible, ordinary generation has already completed.
+                    except Exception as failure:
+                        # Value-free failure; a failed save is visible, ordinary generation has already completed. Rejections and
+                        # transient failures carry fixed value-free reasons; anything else stays generic.
+                        reason = str(failure) if isinstance(failure, (runtime.Rejected, runtime.Transient)) else 'preferences could not be saved'
                         with connection.transaction():
-                            if connection.execute("UPDATE memory_extractions SET status='failed',error='preferences could not be saved' WHERE job_id=%s AND status='running' RETURNING 1", (job[0],)).fetchone():
+                            if connection.execute("UPDATE memory_extractions SET status='failed',error=%s WHERE job_id=%s AND status='running' RETURNING 1", (reason, job[0])).fetchone():
                                 notice(connection, job)
         except psycopg.Error:
             print('Memory unavailable; ordinary service continues without memory', flush=True)
