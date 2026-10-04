@@ -103,17 +103,19 @@ async function refreshMemberships() {
     button.addEventListener('click',()=>run(async()=>{await request(path+'/website-origins',{origin,approved:false});status.textContent='Website origin removed.';}));
     li.append(button);return li;
   }));
-  // Generation permissions only; extraction permissions arrive with Customer memory.
+  // Generation and Jev decision permissions; extraction permissions are managed with Customer memory.
   const {permissions,providers,selected}=await request(path+'/provider-permissions');
-  const shown=[['deepseek','DeepSeek'],['qwen','Qwen']];
+  const shown=[['deepseek','DeepSeek','generation'],['qwen','Qwen','generation'],['jev','Jev','decision']];
   const models=Object.assign(document.createElement('li'),{textContent:`Published version ${selected.version} (${selected.mode}): `+(selected.agents.map(a=>
-    `${a.agent} uses ${a.model}${a.fallback?`, fallback ${a.fallback}`:''}`).join('; ')||'no agent selects a model')+'.'});
-  document.querySelector('#providers').replaceChildren(models,...shown.map(([id,name])=>{
+    `${a.agent} uses ${a.model}${a.fallback?`, fallback ${a.fallback}`:''}`).join('; ')||'no agent selects a model')+'.'+
+    (selected.decision?` Decisions use ${selected.decision.engine}/${selected.decision.model}.`:'')});
+  document.querySelector('#providers').replaceChildren(models,...shown.map(([id,name,operation])=>{
     const li=document.createElement('li'),label=document.createElement('label'),box=document.createElement('input');
-    box.type='checkbox';box.checked=permissions.some(p=>p.provider===id&&p.operation==='generation'&&p.allowed);
-    box.addEventListener('change',()=>run(async()=>{await request(`${path}/provider-permissions/${id}/generation`,{allowed:box.checked});
-      status.textContent=`${name} generation ${box.checked?'allowed':'not allowed'}.`;}));
-    label.append(box,` Allow ${name} generation`);
+    const plural=operation==='decision'?'decisions':operation;
+    box.type='checkbox';box.checked=permissions.some(p=>p.provider===id&&p.operation===operation&&p.allowed);
+    box.addEventListener('change',()=>run(async()=>{await request(`${path}/provider-permissions/${id}/${operation}`,{allowed:box.checked});
+      status.textContent=`${name} ${plural} ${box.checked?'allowed':'not allowed'}.`;}));
+    label.append(box,` Allow ${name} ${plural}`);
     const report=providers?.[id];
     li.append(Object.assign(document.createElement('span'),{textContent:`${name}: ${report?.role??'role unknown'}`}),label,
       Object.assign(document.createElement('p'),{className:'help',textContent:report?`Endpoint ${report.endpoint}. Key ${report.key}.`:'Worker readiness unavailable.'}));

@@ -39,8 +39,10 @@ if not 1 <= LEASE <= 60:
 # Generation providers at fixed endpoints; keys come only from this worker's environment and are sent only to their own endpoint.
 # The Qwen base is exactly the approved Singapore/International one. Test only: the fixture answers for these names, trusted
 # through the test CA.
+# Jev (TypeSafe) is a decision engine, not a generator: its entry is its one evaluation endpoint.
 PROVIDERS = {'deepseek': ('https://api.deepseek.com', 'DEEPSEEK_API_KEY'),
-             'qwen': ('https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'DASHSCOPE_API_KEY')}
+             'qwen': ('https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'DASHSCOPE_API_KEY'),
+             'jev': ('https://api.typesafe.ai/v1/systemone', 'TYPESAFE_API_KEY')}
 KEYS = {provider: os.environ.get(variable, '') for provider, (_, variable) in PROVIDERS.items()}
 QWEN_SCOPE = ('Singapore access and static storage; inference potentially worldwide excluding Chinese mainland '
               '(not Singapore-only processing)')
@@ -48,7 +50,8 @@ KEY_STATE = {provider: 'configured (outbound calls need compose.connected.yaml);
              else f'missing: set {variable} for the worker' for provider, (_, variable) in PROVIDERS.items()}
 GENERATION = {'deepseek': {'endpoint': PROVIDERS['deepseek'][0], 'key': KEY_STATE['deepseek'], 'role': 'final replies'},
               'qwen': {'endpoint': PROVIDERS['qwen'][0], 'key': KEY_STATE['qwen'], 'processing': QWEN_SCOPE,
-                       'role': 'one fallback attempt after a transient DeepSeek failure, or an agent\'s selected model; when permitted'}}
+                       'role': 'one fallback attempt after a transient DeepSeek failure, or an agent\'s selected model; when permitted'},
+              'jev': {'endpoint': PROVIDERS['jev'][0], 'key': KEY_STATE['jev'], 'role': 'typed workflow decisions (routing only), when permitted'}}
 # Optional cost estimates: {"provider/model": [USD per million input tokens, USD per million output tokens]}. Without a rate,
 # cost is not estimated. ponytail: one input rate, cache-hit discounts ignored; split rates if cost reports need them.
 try:
@@ -68,6 +71,9 @@ WORKER = f'{os.uname().nodename}-{uuid.uuid4()}'
 HOLD = re.compile(r'^\[hold (\d{1,2})s\]')
 FIELD = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,63}$')
 MAX_STEPS, MAX_AGENT_CALLS, MAX_HTTP_CALLS, HTTP_TIMEOUT, MAX_BODY = 20, 3, 5, 15, 262144
+# Decisions are routed only for English (Jev's best-supported language), asked alongside every decision.
+# ponytail: English only; other languages take the failure route until they are evaluated per language.
+ENGLISH = 'Is `customer_message` written in English?'
 # Website crawling: robots.txt rules for this product token, at most 100 pages per snapshot, 2 MB per page, five redirects per request.
 AGENT, MAX_PAGES, MAX_PAGE, MAX_REDIRECTS = 'CustomBotKnowledge', 100, 2_000_000, 5
 CLOSING = 'Answer now with the one JSON object described in your instructions.'
@@ -298,7 +304,8 @@ class Turn:
         self.connection, self.job, self.document, self.history, self.message = connection, job, document, history, message
         self.deadline = job[5]
         # Fields from verified HTTP results; agents cannot overwrite them.
-        self.context, self.observed, self.steps, self.calls = {}, set(), 0, {'provider': 0, 'http': 0}
+        # Decision attempts have no call budget of their own: steps, one retry each and the deadline bound them.
+        self.context, self.observed, self.steps, self.calls = {}, set(), 0, {'provider': 0, 'http': 0, 'decision': 0}
         # Grants (without secrets) behind accepted results, rechecked before their facts go to a provider or the Customer.
         self.grants = {}
         # Passages retrieved this turn (None before any retrieval step), kept apart from the context; their sources are rechecked
@@ -374,7 +381,8 @@ class Turn:
             held = current(self.connection, self.job, bool(action or permit or self.grants or self.permits))
             changed = held and (stale(self.connection, self.job, self.grants.values()) and 'action controls changed'
                                 or lapsed(self.connection, self.job[1], self.permits) and 'provider permission changed')
-            if held and not changed and kind == 'provider' and self.memory and not self.memory_current():
+            # Only generation sends preferences; a decision attempt never needs (or may fail on) memory.
+            if held and not changed and permit and permit[1] == 'generation' and self.memory and not self.memory_current():
                 changed = 'memory controls changed'
             if held and not changed and self.versions() and withdrawn(self.connection, self.versions()):
                 changed = 'knowledge source deleted or expired'
@@ -511,7 +519,7 @@ class Turn:
         """A transient failure retries once (attempt(2), which may choose a fallback); every attempt, retries included, spends the budget."""
         for tries in (1, 2):
             self.calls[kind] += 1
-            if self.calls[kind] > (MAX_AGENT_CALLS if kind == 'provider' else MAX_HTTP_CALLS):
+            if self.calls[kind] > {'provider': MAX_AGENT_CALLS, 'http': MAX_HTTP_CALLS}.get(kind, float('inf')):
                 raise Stop(EXHAUSTED, 'call budget exhausted')
             try:
                 return attempt(tries)
@@ -610,6 +618,73 @@ class Turn:
             if self.act(step['id'], next(a for a in self.document['actions'] if a['id'] == action_id), values) is None:
                 return 'unsupported', None
 
+    def decide(self, step):
+        """One typed decision by the selected engine; only its validated choice name is used, to pick the next connection: a
+        probable enough choice takes its own route, a less probable one the uncertain route, and any failure the failure route.
+        Nothing the engine returns reaches the context, a prompt or the Customer, or authorizes anything."""
+        selected = self.document['decision']
+        engine = selected['engine']
+        target = f"{engine}/{selected.get('model') or ('jev-latest' if engine == 'jev' else 'default')}"
+        # Only the selected engine is ever called, never another in its place.
+        if engine != 'jev':
+            return self.refuse(step['id'], target, f'{engine} decisions are not available in this version')
+        if not KEYS['jev']:
+            # Nothing is sent, and no inference is claimed.
+            return self.refuse(step['id'], target, 'decision unavailable: TYPESAFE_API_KEY not set')
+        try:
+            return self.retried('decision', lambda _: self.judge(step, target))
+        except Rejected:
+            return 'failure'
+
+    def refuse(self, step, target, error):
+        """A decision attempt refused before any transfer, recorded as failed; the failure route follows."""
+        self.connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation) "
+                                "VALUES(%s,%s,%s,'provider',%s,'failed',%s,clock_timestamp(),'decision')", (self.job[1], self.job[0], step, target, error))
+        print(f'Provider attempt job={self.job[0]} step={step} {target} decision failed in 0.00s error={error}', flush=True)
+        return 'failure'
+
+    def judge(self, step, target):
+        """One bounded Jev attempt under the Business's live decision permission, sending only the Customer's message. Its answer
+        is accepted only after validation and while the turn and that permission are unchanged. Logged value-free."""
+        bound = min(HTTP_TIMEOUT, self.left())
+        attempt, revision = self.begin(step['id'], 'provider', target, bound, permit=('jev', 'decision'))
+        status, error, measured, recorded, started = 'failed', 'aborted', UNMEASURED, False, time.monotonic()
+        try:
+            payload = {'model': target.split('/', 1)[1], 'state': {'customer_message': self.message},
+                       'questions': {'route': {'type': 'choice', 'instructions': step['question'], 'criteria': step['choices']},
+                                     'english': {'type': 'noul', 'instructions': ENGLISH}}}
+            raw = fetch('POST', PROVIDERS['jev'][0], payload, min(bound, self.left()), {'authorization': f'Bearer {KEYS["jev"]}'})
+            try:
+                data = strict(raw)
+            except ValueError:
+                raise Rejected('malformed decision output')
+            if isinstance(data, dict):
+                measured = measure('jev', data)
+            route = decision_route(data, step['choices'], step['min_probability'])
+            with self.connection.transaction():
+                held = current(self.connection, self.job, True)
+                accepted = held and permitted(self.connection, self.job[1], 'jev', 'decision') == revision
+                if accepted:
+                    status, error, recorded = 'succeeded', None, True
+                    self.end(attempt, status, error, measured)
+            if not held:
+                raise Lost()
+            if not accepted:
+                # A revoked or changed permission defeats a delayed decision.
+                raise Rejected('provider permission changed')
+            # Like generated text, whatever this decision routed to is delivered only while its permission stands.
+            self.permits[('jev', 'decision')] = revision
+            return route
+        except (Transient, Rejected) as failure:
+            error = str(failure)
+            raise
+        finally:
+            if not recorded:
+                self.end(attempt, status, error, measured)
+            served, prompt, completion, cost = measured
+            print(f"Provider attempt job={self.job[0]} step={step['id']} {target} decision {status} in {time.monotonic() - started:.2f}s "
+                  f"served={served} tokens={prompt}/{completion} cost_usd={cost}{f' error={error}' if error else ''}", flush=True)
+
     def http(self, step):
         action = next(a for a in self.document['actions'] if a['id'] == step['action'])
         return 'failure' if self.act(step['id'], action, self.context) is None else 'success'
@@ -635,6 +710,8 @@ class Turn:
                 output = 'yes' if same(value, step['equals']) else 'fallback'
             elif kind == 'http':
                 output = self.http(step)
+            elif kind == 'decision':
+                output = self.decide(step)
             else:
                 output, value = self.agent(step)
                 if output == 'reply':
@@ -658,7 +735,9 @@ def measure(provider, data):
         return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 2 ** 31 else None
     usage = data.get('usage') if isinstance(data.get('usage'), dict) else {}
     served = data.get('model') if isinstance(data.get('model'), str) and len(data['model']) <= 100 else None
-    prompt, completion = count(usage.get('prompt_tokens')), count(usage.get('completion_tokens'))
+    # TypeSafe reports input/output tokens (and charges input only); the OpenAI-compatible providers prompt/completion tokens.
+    names = ('input_tokens', 'output_tokens') if provider == 'jev' else ('prompt_tokens', 'completion_tokens')
+    prompt, completion = (count(usage.get(name)) for name in names)
     rate = RATES.get(f'{provider}/{served}')
     cost = round((prompt * rate[0] + completion * rate[1]) / 1e6, 8) if rate and prompt is not None and completion is not None else None
     return served, prompt, completion, cost
@@ -669,6 +748,40 @@ def same(a, b):
     def number(v):
         return isinstance(v, (int, float)) and not isinstance(v, bool)
     return (number(a) and number(b) or type(a) is type(b)) and a == b
+
+
+def decision_route(data, choices, threshold):
+    """Jev's answers, each validated on its own: shape, the choice name, its probabilities, the language, and only then the
+    threshold, applied to the validated probability of the choice (not the reported confidence). Returns the choice name or
+    'uncertain'; raises Rejected."""
+    def probability(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1
+    answers = data.get('answers') if isinstance(data, dict) else None
+    route, english = (answers.get('route'), answers.get('english')) if isinstance(answers, dict) else (None, None)
+    if (not isinstance(answers, dict) or set(answers) != {'route', 'english'} or not isinstance(route, dict) or route.get('type') != 'choice'
+            or not isinstance(route.get('choice'), str) or not isinstance(route.get('probabilities'), dict) or not probability(route.get('confidence'))
+            or not isinstance(english, dict) or english.get('type') != 'noul' or not probability(english.get('noul'))):
+        raise Rejected('malformed decision output')
+    choice, probabilities = route['choice'], route['probabilities']
+    if choice not in choices:
+        raise Rejected('undeclared decision choice')
+    # Probabilities arrive rounded (to two decimals in observed responses), so their sum may be off by half a hundredth per choice.
+    if (set(probabilities) != set(choices) or not all(probability(p) for p in probabilities.values())
+            or abs(sum(probabilities.values()) - 1) > 0.005 * len(choices) or probabilities[choice] < max(probabilities.values())):
+        raise Rejected('decision probabilities do not match the choices')
+    if english['noul'] < 0.5:
+        raise Rejected('unsupported language')
+    return choice if probabilities[choice] >= threshold else 'uncertain'
+
+
+def reason(response):
+    """A refusal's machine-readable error type as TypeSafe sends it ({"detail":{"error_type":"max_tokens_exceeded"}}), else
+    nothing; never its message."""
+    try:
+        kind = json.loads(response.read(4096))['detail']['error_type']
+    except (ValueError, KeyError, TypeError, OSError, RecursionError):
+        return ''
+    return f' {kind}' if isinstance(kind, str) and re.fullmatch(r'[a-z_]{1,40}', kind) else ''
 
 
 def strict(raw):
@@ -796,7 +909,7 @@ def request(method, url, body, deadline, headers=None, page=False):
         if page and not 200 <= response.status < 300:
             return response.status, response.getheader('location'), None, b''
         if not 200 <= response.status < 300:
-            raise Rejected(f'status {response.status}')
+            raise Rejected(f'status {response.status}{reason(response)}')
         data = bytearray()
         while chunk := response.read1(65536):
             data += chunk

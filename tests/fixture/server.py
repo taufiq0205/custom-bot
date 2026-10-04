@@ -1,6 +1,7 @@
-"""Test-only controlled external fixture: OpenAI-compatible providers and a business HTTPS endpoint.
-It answers as api.deepseek.com and dashscope-intl.aliyuncs.com on the test network only. A Qwen request's key is the
-system prompt's fixture key plus "@qwen", so each provider has its own script queue.
+"""Test-only controlled external fixture: OpenAI-compatible providers, the TypeSafe decision API and a business HTTPS endpoint.
+It answers as api.deepseek.com, dashscope-intl.aliyuncs.com and api.typesafe.ai on the test network only. A Qwen request's key
+is the system prompt's fixture key plus "@qwen", and a Jev request's is the question's fixture key plus "@jev", so each provider
+has its own script queue.
 Tests script responses per key on the plain control port and read back what the worker sent.
 Website pages are persistent per key (a crawl may run again at any time): /site sets a key's pages, served on every host under
 /<key>/..., and its robots.txt lines, all merged into one "User-agent: *" group at each host's /robots.txt.
@@ -112,6 +113,9 @@ class Fixture(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('content-length', 0))) or b'null')
         if self.server.server_port == 8080:
             return self.control(body)
+        if self.headers.get('host', '').startswith('api.typesafe.ai'):
+            key = re.search(r'fixture-key:(\S+)', json.dumps(body.get('questions')))
+            return self.respond((key[1] if key else '') + '@jev', 'decision', body)
         system = ' '.join(m.get('content', '') for m in body.get('messages', []) if m.get('role') == 'system')
         key = re.search(r'fixture-key:(\S+)', system)
         qwen = self.headers.get('host', '').startswith('dashscope-intl.aliyuncs.com')

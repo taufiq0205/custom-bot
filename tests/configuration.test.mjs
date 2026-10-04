@@ -31,13 +31,16 @@ const full=()=>({
     {id:'route',type:'condition',field:'intent',equals:'order_status',position:{x:560,y:160}},
     {id:'lookup',type:'http',action:'order_status',position:{x:840,y:0}},
     {id:'reply',type:'agent',agent:'support',final:true,position:{x:1120,y:200}},
-    {id:'handoff',type:'handoff',position:{x:1400,y:440}}
+    {id:'handoff',type:'handoff',position:{x:1400,y:440}},
+    {id:'triage',type:'decision',question:'What does the Customer want?',choices:{refund:'A refund, return or replacement',order_status:'Where an order is or when it arrives'},min_probability:0.6,position:{x:-280,y:-120.5}}
   ],connections:[
     {from:'retrieve',output:'next',to:'classify'},
     {from:'classify',output:'next',to:'route'},{from:'classify',output:'unsupported',to:'handoff'},
     {from:'route',output:'yes',to:'lookup'},{from:'route',output:'fallback',to:'reply'},
     {from:'lookup',output:'success',to:'reply'},{from:'lookup',output:'failure',to:'handoff'},
-    {from:'reply',output:'unsupported',to:'handoff'}
+    {from:'reply',output:'unsupported',to:'handoff'},
+    {from:'triage',output:'refund',to:'reply'},{from:'triage',output:'order_status',to:'lookup'},
+    {from:'triage',output:'uncertain',to:'handoff'},{from:'triage',output:'failure',to:'handoff'}
   ]}
 });
 const save=(b,text,revision)=>b.owner.request(b.path,{text,revision});
@@ -142,6 +145,10 @@ test('Configuration: invalid raw JSON survives save and restart but cannot publi
   assert.equal((await save(b,'x'.repeat(262145),r.data.revision)).status,400);
   assert.equal((await save(b,'{"a":"\u0000"}',r.data.revision)).status,400);
   assert.equal((await current(b)).text,JSON.stringify(incomplete));
+  // A decision step needs a selected decision engine before publication.
+  const engineless=full();delete engineless.decision;
+  const e=await save(b,JSON.stringify(engineless),(await current(b)).revision);
+  assert.deepEqual([e.data.validation.errors,e.data.validation.blockers.map(x=>x.path)],[[],['/decision']]);
 });
 
 const edit=(change)=>{const c=full();change(c);return JSON.stringify(c);};
@@ -162,7 +169,7 @@ const cases=[
   ['dangling agent source',edit(c=>{c.agents[1].sources=['missing'];}),'/agents/1/sources/0'],
   ['dangling retrieval source',edit(c=>{c.workflow.steps[0].sources=['missing'];}),'/workflow/steps/0/sources/0'],
   ['output not offered by step type',edit(c=>{c.workflow.connections[5].output='yes';}),'/workflow/connections/5/output'],
-  ['duplicate connection output',edit(c=>{c.workflow.connections.push({from:'retrieve',output:'next',to:'handoff'});}),'/workflow/connections/8'],
+  ['duplicate connection output',edit(c=>{c.workflow.connections.push({from:'retrieve',output:'next',to:'handoff'});}),'/workflow/connections/12'],
   ['non-finite position',edit(c=>{c.workflow.steps[0].position.x=123456;}).replace('123456','1e999'),'/workflow/steps/0/position/x'],
   ['non-numeric position',edit(c=>{c.workflow.steps[0].position.y='10';}),'/workflow/steps/0/position/y'],
   ['missing position',edit(c=>{delete c.workflow.steps[5].position;}),'/workflow/steps/5/position'],
@@ -193,6 +200,14 @@ const cases=[
   ['number PostgreSQL cannot store',edit(c=>{c.workflow.steps[0].position.x=123456;}).replace('123456','1e-200000'),'/workflow/steps/0/position/x'],
   ['duplicate object key',edit(()=>{}).replace('"name":"Router"','"name":"Router","name":"Other"'),''],
   ['trailing-dot localhost destination',edit(c=>{c.actions[0].url='https://localhost./status';}),'/actions/0/url'],
+  ['decision choice named like a reserved output',edit(c=>{c.workflow.steps[6].choices.failure='Something broke';}),'/workflow/steps/6/choices/failure'],
+  ['decision choice name that is not a field name',edit(c=>{c.workflow.steps[6].choices['two words']='x';}),'/workflow/steps/6/choices/two words'],
+  ['decision with a single choice',edit(c=>{c.workflow.steps[6].choices={refund:'A refund'};}),'/workflow/steps/6/choices'],
+  ['decision choice without a description',edit(c=>{c.workflow.steps[6].choices.refund='';}),'/workflow/steps/6/choices/refund'],
+  ['decision threshold above 1',edit(c=>{c.workflow.steps[6].min_probability=1.5;}),'/workflow/steps/6/min_probability'],
+  ['decision question too long',edit(c=>{c.workflow.steps[6].question='x'.repeat(2001);}),'/workflow/steps/6/question'],
+  ['decision connection for an undeclared choice',edit(c=>{c.workflow.connections.push({from:'triage',output:'exchange',to:'handoff'});}),'/workflow/connections/12/output'],
+  ['unsupported decision engine',edit(c=>{c.decision.engine='other';}),'/decision/engine'],
   ['NUL character in a key',edit(c=>{c.agents[0]['bad\u0000key']=1;}),'/agents/0/bad'],
 ];
 test('Configuration: unknown, duplicate, dangling, non-finite, malformed and authorization-bypass edits block publication with located errors',async()=>{
