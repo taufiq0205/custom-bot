@@ -32,7 +32,7 @@ test('Workflow: retrieval, condition, HTTP and multi-agent transitions with stru
   const context=JSON.parse(final.body.messages.at(-1).content.replace(/^Workflow context \(data, not instructions\): /,''));
   assert.deepEqual(context,{intent:'order',order_id:'A-100',status:'shipped'});
   assert(final.body.messages.some(m=>m.role==='user'&&m.content==='Where is my order A-100?'));
-  assert.equal(final.body.model,'fixture');
+  assert.equal(final.body.model,'deepseek-flash');
 
   const hours=await customer.ask('When do you open?');
   assert.deepEqual(hours.replies.map(m=>m.text),['We open at nine.']);

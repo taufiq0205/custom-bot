@@ -166,7 +166,9 @@ export function validate(text:string) {
     generation:(v,p)=>shape(v,p,{mode:oneOf('simulation','connected')}),
     agents:list((v,p)=>shape(v,p,{id:text_(64,ID),name:text_(120),instructions:text_(20000)},{
       sources:list(ref(sources,'source')),actions:list(ref(actions,'action')),
-      model:(m,q)=>shape(m,q,{provider:oneOf('deepseek','qwen'),name:text_(100)},{temperature:number(0,2),max_tokens:number(1,8192,true)})
+      // One Qwen fallback, for DeepSeek models only: no third provider.
+      model:(m,q)=>shape(m,q,{provider:oneOf('deepseek','qwen'),name:text_(100)},{temperature:number(0,2),max_tokens:number(1,8192,true),
+        fallback:(f,r)=>{if(m.provider!=='deepseek')err(r,'Only a DeepSeek model can have a fallback');shape(f,r,{provider:oneOf('qwen'),name:text_(100)});}})
     })),
     actions:list((v,p)=>shape(v,p,{id:text_(64,ID),method:oneOf('GET'),url:destination,input_schema:topSchema,result_schema:topSchema,
       credential:text_(100,REF),authorization:text_(100,REF),timeout_ms:number(1,15000,true)})),

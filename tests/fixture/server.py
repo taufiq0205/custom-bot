@@ -1,6 +1,8 @@
-"""Test-only controlled external fixture: an OpenAI-compatible provider and a business HTTPS endpoint.
+"""Test-only controlled external fixture: OpenAI-compatible providers and a business HTTPS endpoint.
+It answers as api.deepseek.com and dashscope-intl.aliyuncs.com on the test network only. A Qwen request's key is the
+system prompt's fixture key plus "@qwen", so each provider has its own script queue.
 Tests script responses per key on the plain control port and read back what the worker sent.
-cert.pem/key.pem are a self-signed test-only CA for *.fixture.test; they protect nothing."""
+cert.pem/key.pem are a self-signed test-only CA for *.fixture.test and those two names; they protect nothing."""
 import json
 import re
 import select
@@ -50,7 +52,8 @@ class Fixture(BaseHTTPRequestHandler):
             return
         raw = script.get('raw')
         if raw is None and kind == 'provider':
-            raw = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': script['content']}}]})
+            raw = json.dumps({'model': script.get('model', body.get('model')), 'usage': script.get('usage', {'prompt_tokens': 1000, 'completion_tokens': 100}),
+                              'choices': [{'finish_reason': script.get('finish', 'stop'), 'message': {'role': 'assistant', 'content': script['content']}}]})
         if raw is None and script.get('owner'):
             # The requesting Customer's own record: copy the platform-supplied customer parameter into the owner field.
             raw = json.dumps({**script['json'], script['owner']: entry['query'].get('customer')})
@@ -83,7 +86,8 @@ class Fixture(BaseHTTPRequestHandler):
             return self.control(body)
         system = ' '.join(m.get('content', '') for m in body.get('messages', []) if m.get('role') == 'system')
         key = re.search(r'fixture-key:(\S+)', system)
-        self.respond(key[1] if key else '', 'provider', body)
+        qwen = self.headers.get('host', '').startswith('dashscope-intl.aliyuncs.com')
+        self.respond((key[1] if key else '') + ('@qwen' if qwen else ''), 'provider', body)
 
     def control(self, body):
         with lock:
