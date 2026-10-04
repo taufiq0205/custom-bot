@@ -71,6 +71,8 @@ The API's raw-text scope check was found by the scope test before any mutation: 
 
 ## Real integration run (2026-10-04)
 
+First run at 16:39 UTC on `5eb4c47`. It was repeated at 17:14 UTC on the reviewed code (`026fac7`) with identical outcomes: `w3.org` again gave 41 pages and 911 passages, in 46 s; the answer used 379 input and 67 output tokens.
+
 The worker crawled real public sites and used real DeepSeek for one answer. Synthetic Businesses were used, and no key values were printed.
 
 | Stack | Site | Result |
@@ -106,4 +108,5 @@ The worker crawled real public sites and used real DeepSeek for one answer. Synt
 | `node --test tests/website.test.mjs`, after the review fixes | 7/7 pass, 0 failed assertions |
 | `node --test --test-concurrency=1 tests/knowledge.test.mjs tests/memory.test.mjs` | 29/29 pass |
 | Mutation checks | 9/9 caught |
-| Real integration run | as recorded above |
+| Real integration run, before and after the review | as recorded above |
+| `caffeinate -i npm test`, full suite after the review fixes (2026-10-04, 24.1 min) | **89/89 pass, 0 failed, cancelled or skipped** |
