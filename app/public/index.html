@@ -4,98 +4,194 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Custom Bot — Operator</title>
 <link rel="stylesheet" href="/style.css">
-<script src="/ui.js" defer>
-</script>
+<script src="/workflow-editor.js" defer></script>
+<script src="/ui.js" defer></script>
 <body>
-<main>
-<h1>Operator access</h1>
-<p>Local development. Verification and recovery codes arrive in your configured mail transport.</p>
+<div class="app" id="app" data-view="account">
+<nav class="rail" aria-label="Sections">
+<div class="logo" aria-hidden="true">C</div>
+<button class="rail-item" type="button" data-nav="home" aria-label="Businesses" title="Businesses">◇</button>
+<button class="rail-item" type="button" data-nav="configuration" aria-label="Configuration" title="Configuration" disabled>⌘</button>
+<button class="rail-item" type="button" data-nav="team" aria-label="Team and website" title="Team and website" disabled>☰</button>
+<button class="rail-item" type="button" data-nav="inbox" aria-label="Inbox" title="Inbox" disabled>✉</button>
+<span class="rail-spacer"></span>
+<button class="rail-item" type="button" data-nav="account" aria-label="Account" title="Account">◔</button>
+</nav>
+<div class="main">
+<header class="topbar">
+<div class="crumbs"><span id="crumb-business">Custom Bot</span><span class="crumb-sep">/</span><h1 id="crumb-title">Operator access</h1></div>
+<div class="seg config-only" role="group" aria-label="Configuration view">
+<button id="workflow-tab" type="button" aria-pressed="true" data-focus-key="tab:workflow">Workflow</button>
+<button id="json-tab" type="button" aria-pressed="false" data-focus-key="tab:json">JSON</button>
+</div>
+<span class="spacer"></span>
+<span id="config-state" class="version config-only"></span>
+<button id="config-reload" class="config-only" type="button">Reload draft</button>
+<button id="config-save" class="config-only" type="button">Save draft</button>
+<button id="config-publish" class="btn-primary config-only" type="button">Publish</button>
+<button id="signout" class="signed-in-only" type="button">Sign out</button>
+</header>
+<div class="work">
+
+<section class="view page" data-view-name="account">
+<div class="card narrow">
+<h2>Operator access</h2>
+<p class="help">Local development. Verification and recovery codes arrive in your configured mail transport.</p>
 <form id="account">
-<label>Name <input name="name" autocomplete="name" value="Operator" required>
-</label>
-<label>Email <input name="email" type="email" autocomplete="username" required>
-</label>
-<label>Password <input name="password" type="password" autocomplete="current-password" minlength="12">
-</label>
-<div>
+<label>Name <input name="name" autocomplete="name" value="Operator" required></label>
+<label>Email <input name="email" type="email" autocomplete="username" required></label>
+<label>Password <input name="password" type="password" autocomplete="current-password" minlength="12"></label>
+<div class="actions">
+<button class="btn-primary" name="action" value="signin">Sign in</button>
 <button name="action" value="signup">Create account</button>
-<button name="action" value="signin">Sign in</button>
 <button name="action" value="recover">Recover access</button>
 <button name="action" value="resend">Resend verification</button>
 </div>
-<label>One-time code <input name="otp" inputmode="numeric" autocomplete="one-time-code">
-</label>
-<div>
+<label>One-time code <input name="otp" inputmode="numeric" autocomplete="one-time-code"></label>
+<div class="actions">
 <button name="action" value="verify">Verify email</button>
 <button name="action" value="reset">Reset password</button>
 </div>
 </form>
-<p id="status" role="status" aria-live="polite">
-</p>
-<section id="workspace" hidden>
+</div>
+</section>
+
+<div id="workspace" class="workspace" hidden>
+<section class="view page" data-view-name="home">
+<div class="card">
 <h2>Your Businesses</h2>
-<ul id="businesses">
-</ul>
-<form id="business">
-<label>Business name <input name="name" required maxlength="120">
-</label>
-<button>Create Business as Owner</button>
+<ul id="businesses" class="rows"></ul>
+</div>
+<div class="card-grid">
+<form id="business" class="card">
+<h3>New Business</h3>
+<label>Business name <input name="name" required maxlength="120"></label>
+<button class="btn-primary">Create Business as Owner</button>
 </form>
-<form id="accept-invitation">
+<form id="accept-invitation" class="card">
+<h3>Join a Business</h3>
 <label>Invitation token <input name="token" required minlength="64" maxlength="64" autocomplete="off"></label>
 <button>Accept invitation</button>
 </form>
-<section id="membership-panel" hidden>
+</div>
+</section>
+
+<section id="membership-panel" class="view page" data-view-name="team" hidden>
+<div class="card">
 <h2 id="membership-title">Business Memberships</h2>
-<ul id="members"></ul>
-<form id="invite">
+<ul id="members" class="rows"></ul>
+<form id="invite" class="inline-form">
 <label>Invite email <input name="email" type="email" required maxlength="254"></label>
 <label>Invite role <select name="role"><option>Support</option><option>Owner</option></select></label>
-<button>Send invitation</button>
+<button class="btn-primary">Send invitation</button>
 </form>
-<ul id="invitations"></ul>
+<ul id="invitations" class="rows"></ul>
+</div>
+<div class="card">
 <h3>Website chat origins</h3>
-<p>Only these websites can embed chat for this Business.</p>
-<ul id="origins"></ul>
-<form id="origin">
+<p class="help">Only these websites can embed chat for this Business.</p>
+<ul id="origins" class="rows"></ul>
+<form id="origin" class="inline-form">
 <label>Website origin <input name="origin" type="url" required maxlength="200" placeholder="https://shop.example.com"></label>
-<button>Approve origin</button>
+<button class="btn-primary">Approve origin</button>
 </form>
-<section id="configuration-panel">
-<h3>Configuration</h3>
-<p>Edit the JSON draft. Saving keeps invalid text; only a complete, valid draft can be published. New conversations use the latest published version.</p>
-<p id="config-state"></p>
-<label>Configuration JSON <textarea id="config-text" rows="18" spellcheck="false" autocomplete="off"></textarea></label>
-<button id="config-save">Save draft</button>
-<button id="config-publish">Publish</button>
-<button id="config-reload">Reload draft</button>
-<ul id="config-issues"></ul>
+</div>
 </section>
+
+<section id="configuration-panel" class="view" data-view-name="configuration">
+<div id="workflow-editor" class="workflow-editor" hidden>
+<section id="workflow-view" class="workflow-view panel" aria-label="Workflow editor">
+<div id="workflow-canvas" role="region" aria-label="Workflow canvas" tabindex="0">
+<div id="workflow-world"><svg id="workflow-wires" aria-hidden="true"></svg><div id="workflow-nodes"></div></div>
+<p class="canvas-help">Drag empty space to pan · <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + scroll to zoom · drag a <b>+</b> port to connect</p>
+</div>
+<svg id="workflow-minimap" viewBox="0 0 184 112" role="img" aria-label="Workflow minimap"><title>Workflow minimap. Click or drag to pan.</title></svg>
+<div class="canvas-bar">
+<button id="workflow-zoom-out" type="button" aria-label="Zoom out">−</button>
+<output id="workflow-zoom" aria-live="polite">100%</output>
+<button id="workflow-zoom-in" type="button" aria-label="Zoom in">+</button>
+<button id="workflow-fit" type="button" aria-label="Fit workflow to view">Fit</button>
+<span class="sep"></span>
+<button id="add-step" type="button" aria-keyshortcuts="/">+ Add step <kbd>/</kbd></button>
+<button id="workflow-tidy" type="button">Tidy</button>
+<button id="disconnect-edge" class="btn-danger" type="button" hidden>Disconnect selected link</button>
+</div>
+<aside id="config-inspector" class="config-inspector" aria-label="Step settings" hidden>
+<div class="inspector-heading"><div><p id="inspector-kind" class="node-kind"></p><h4 id="inspector-name" class="node-title"></h4></div><button id="close-inspector" class="btn-ghost" type="button" aria-label="Close step settings">×</button></div>
+<label for="inspector-step-id">Step ID</label><input id="inspector-step-id" class="mono" readonly>
+<div id="inspector-entry"></div>
+<div id="inspector-fields"></div>
+<div id="inspector-connections"></div>
+<button id="delete-step" class="btn-danger" type="button">Delete step…</button>
+</aside>
 </section>
-<section id="inbox-panel" hidden>
+<section id="json-view" class="json-view panel" hidden>
+<nav id="json-outline" class="outline" aria-label="JSON sections"></nav>
+<div class="json-editor-wrap">
+<label for="config-text">Configuration JSON</label>
+<p class="help">The same draft as the workflow canvas. Invalid text is kept until you repair or discard it; only complete drafts can be published.</p>
+<div class="json-editor"><pre id="json-gutter" aria-hidden="true">1</pre><textarea id="config-text" rows="20" spellcheck="false" autocomplete="off" wrap="off"></textarea></div>
+<div id="json-error-box" class="json-error-box" role="alert" hidden><ul id="json-errors"></ul><div class="err-actions"><button id="json-go-error" type="button">Go to error</button><button id="config-discard-invalid" type="button">Discard invalid text</button></div></div>
+</div>
+</section>
+<ul id="config-issues" class="issues"></ul>
+</div>
+</section>
+
+<section id="inbox-panel" class="view page" data-view-name="inbox" hidden>
+<div class="inbox-layout">
+<div class="card">
 <h2 id="inbox-title">Inbox</h2>
-<p id="inbox-availability"></p>
+<p id="inbox-availability" class="help"></p>
 <button id="inbox-toggle">Set Available</button>
-<p id="inbox-team"></p>
-<ul id="inbox-list"></ul>
-<section id="inbox-conversation" hidden>
+<p id="inbox-team" class="help"></p>
+<ul id="inbox-list" class="rows"></ul>
+</div>
+<section id="inbox-conversation" class="card" hidden>
 <h3>Conversation</h3>
-<p id="inbox-meta"></p>
-<ol id="inbox-messages" role="log" aria-live="polite"></ol>
+<p id="inbox-meta" class="help"></p>
+<ol id="inbox-messages" class="messages" role="log" aria-live="polite"></ol>
 <h4>Order lookups</h4>
-<p>Historical observations: each shows what the business API returned at that time, not current status.</p>
-<ul id="inbox-lookups"></ul>
+<p class="help">Historical observations: each shows what the business API returned at that time, not current status.</p>
+<ul id="inbox-lookups" class="rows mono"></ul>
+<div class="actions">
 <button id="inbox-claim">Claim</button>
 <button id="inbox-resolve">Resolve</button>
 <button id="inbox-resume">Return to automated assistant</button>
+</div>
+<div class="inline-form">
 <label>Assign to <select id="inbox-assignee"></select></label>
 <button id="inbox-reassign">Reassign</button>
+</div>
 <label>Reply <textarea id="inbox-reply" rows="3" maxlength="2000"></textarea></label>
-<button id="inbox-send">Send reply</button>
+<button id="inbox-send" class="btn-primary">Send reply</button>
 </section>
+</div>
 </section>
-<button id="signout">Sign out</button>
-</section>
-</main>
+</div>
+
+</div>
+<footer class="statusbar">
+<p id="status" role="status" aria-live="polite"></p>
+<label class="check config-only"><input id="reduce-workflow-motion" type="checkbox"> Reduce motion</label>
+</footer>
+</div>
+</div>
+<dialog id="step-picker" aria-labelledby="step-picker-title">
+<div class="dlg-head"><h2 id="step-picker-title">Add workflow step</h2></div>
+<div class="dlg-body">
+<label for="step-picker-search">Search step types</label><input id="step-picker-search" autocomplete="off" placeholder="Search step types…">
+<div id="step-picker-options" class="pick-list"></div>
+</div>
+<div class="dlg-foot"><button class="close-dialog" type="button">Cancel</button></div>
+</dialog>
+<dialog id="step-delete-dialog" aria-labelledby="step-delete-title">
+<div class="dlg-head"><h2 id="step-delete-title">Delete step</h2></div>
+<div class="dlg-body">
+<p id="step-delete-summary"></p><ul id="step-delete-links"></ul>
+<p class="help">The listed incoming links and start step will be cleared; outgoing links will be removed with the step. Nothing will be rerouted.</p>
+</div>
+<div class="dlg-foot"><button class="close-dialog" type="button">Cancel</button><button id="confirm-step-delete" class="btn-danger-solid" type="button">Delete step</button></div>
+</dialog>
 </body>
 </html>

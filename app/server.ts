@@ -71,7 +71,7 @@ createServer(async (req,res) => {
       }
       return json(404,{error:'Not found'});
     }
-    const files: Record<string,string> = {'/':'index.html','/ui.js':'ui.js','/style.css':'style.css','/widget.js':'widget.js'};
+    const files: Record<string,string> = {'/':'index.html','/ui.js':'ui.js','/workflow-editor.js':'workflow-editor.js','/style.css':'style.css','/widget.js':'widget.js'};
     if (req.method==='GET' && files[path]) {
       res.setHeader('Content-Type', path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');
       return res.end(await readFile(`app/public/${files[path]}`));
