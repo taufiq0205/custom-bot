@@ -28,7 +28,7 @@ npm run typecheck
 docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait
 node --test tests/providers.test.mjs        # 7 tests, about 2 minutes
 caffeinate -i npm test                      # keep the Mac awake; sleep skews the Docker VM clock
-docker compose up -d --wait                 # leave test mode
+docker compose up -d --wait --remove-orphans # leave test mode; also stops the fixture's provider aliases
 ```
 
 ## Acceptance evidence (`tests/providers.test.mjs`)
@@ -57,6 +57,12 @@ Each mutant was applied to `worker.py`, built into the worker image (its presenc
 
 A first "third attempt" mutant (`for tries in (1, 2, 3)` alone) survived because it was equivalent: the `tries == 2` guard still ended the loop. It was replaced by the real three-attempt mutant above.
 
+## Production network path (no keys needed)
+
+- `docker compose -f compose.yaml -f compose.connected.yaml config` puts the worker on `internal` and `web`.
+- A worker run under the overlay completed verified TLS 1.3 to `api.deepseek.com` (issuer Amazon RSA 2048 M01) and `dashscope-intl.aliyuncs.com` (issuer GlobalSign GCC R46 OV TLS CA 2025) with the image's own CA bundle.
+- **Finding:** the first attempt failed with "self-signed certificate". After a test run, `docker compose up -d --wait` had left the test fixture running as an orphan on the internal network, still answering for both provider hostnames. TLS verification refused it, so no key was sent. Leaving test mode now uses `--remove-orphans` (README and above).
+
 ## Code review fixes
 
 `/code-review` (Standards and Spec axes) found these; all fixed and retested:
@@ -71,6 +77,8 @@ Prerequisites: real `DEEPSEEK_API_KEY` and a Singapore/International `DASHSCOPE_
 
 ## Not established by this slice
 
+- **The permission recheck just before delivery** (`finish()`) is defense in depth. No test reaches the gap between accepting the final output and delivering it, so no test or mutant proves it. Late-result acceptance and later transfers are proven (Races test and mutants).
+
 - **Memory extraction** (deferred to #23, see Decisions).
 - **Model quality, latency and cost at scale** belong to #32 and #33.
 - **Owner trace view of attempts** belongs to #27. Attempts are recorded and logged now.
@@ -84,4 +92,5 @@ Prerequisites: real `DEEPSEEK_API_KEY` and a Singapore/International `DASHSCOPE_
 | Mutation checks (6 genuine mutants) | 6/6 caught |
 | Affected files `workflow`, `actions`, `chat`, `configuration` | 24/24 pass |
 | `caffeinate -i npm test`, full run after the review fixes (2026-10-04, 22.0 min) | **62/62 pass, 0 failed assertions**, and no worker tracebacks |
+| After the readiness wording and `--remove-orphans` fix: `node --test --test-concurrency=1 tests/providers.test.mjs tests/chat.test.mjs` | 10/10 pass (an earlier run without `--test-concurrency=1` ran the files in parallel and failed two concurrency-sensitive assertions; that was a command error) |
 | Real DeepSeek and Qwen integration run | **Not yet run: pending real keys.** Until it passes, actual account/model access, real output validity, `enable_thinking: false` acceptance and real usage reporting are unestablished, and this ticket is incomplete. |

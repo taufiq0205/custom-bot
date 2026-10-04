@@ -42,7 +42,7 @@ PROVIDERS = {'deepseek': ('https://api.deepseek.com', 'DEEPSEEK_API_KEY'),
 KEYS = {provider: os.environ.get(variable, '') for provider, (_, variable) in PROVIDERS.items()}
 QWEN_SCOPE = ('Singapore access and static storage; inference potentially worldwide excluding Chinese mainland '
               '(not Singapore-only processing)')
-KEY_STATE = {provider: 'configured; account and model access not verified until a measured run' if KEYS[provider]
+KEY_STATE = {provider: 'configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run' if KEYS[provider]
              else f'missing: set {variable} for the worker' for provider, (_, variable) in PROVIDERS.items()}
 GENERATION = {'deepseek': {'endpoint': PROVIDERS['deepseek'][0], 'key': KEY_STATE['deepseek'], 'role': 'final replies'},
               'qwen': {'endpoint': PROVIDERS['qwen'][0], 'key': KEY_STATE['qwen'], 'processing': QWEN_SCOPE,

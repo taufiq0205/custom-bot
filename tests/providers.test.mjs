@@ -40,8 +40,8 @@ test('browser: an Owner allows and withdraws provider generation, with readiness
       await page.getByRole('button',{name:'Manage providers-browser Business'}).click();
       await page.getByRole('button',{name:'Team and website'}).click();
       await page.getByText('Processing: Singapore access and static storage; inference potentially worldwide excluding Chinese mainland (not Singapore-only processing).',{exact:true}).waitFor();
-      await page.getByText(/^Endpoint https:\/\/api\.deepseek\.com\. Key configured; account and model access not verified/).waitFor();
-      await page.getByText(`Endpoint ${QWEN_BASE}. Key configured; account and model access not verified until a measured run.`,{exact:true}).waitFor();
+      await page.getByText(/^Endpoint https:\/\/api\.deepseek\.com\. Key configured \(outbound calls need compose\.connected\.yaml\); account and model access not verified/).waitFor();
+      await page.getByText(`Endpoint ${QWEN_BASE}. Key configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run.`,{exact:true}).waitFor();
       await page.getByText('Published version 2 (connected): answer uses deepseek/deepseek-flash.',{exact:true}).waitFor();
       const deepseek=page.getByLabel('Allow DeepSeek generation'),qwen=page.getByLabel('Allow Qwen generation');
       if(width===1280) {
@@ -250,8 +250,8 @@ test('Providers races: revoking a permission defeats in-flight output and every 
 test('Providers: Owner-only controls, readiness disclosure, fallback validation and no key values in responses, rows or logs',async()=>{
   const readiness=await fetch(base+'/health/ready').then(r=>r.json());
   assert.deepEqual(readiness.generation,{simulation:'always available, labelled as simulated',
-    deepseek:{endpoint:'https://api.deepseek.com',key:'configured; account and model access not verified until a measured run',role:'final replies'},
-    qwen:{endpoint:QWEN_BASE,key:'configured; account and model access not verified until a measured run',
+    deepseek:{endpoint:'https://api.deepseek.com',key:'configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run',role:'final replies'},
+    qwen:{endpoint:QWEN_BASE,key:'configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run',
       role:'one fallback attempt after a transient DeepSeek failure, or an agent\'s selected model; when permitted',
       processing:'Singapore access and static storage; inference potentially worldwide excluding Chinese mainland (not Singapore-only processing)'}});
 
