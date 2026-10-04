@@ -12,8 +12,9 @@ import ssl
 import sys
 import threading
 import time
+import urllib.robotparser
 import uuid
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urldefrag, urlencode, urljoin, urlsplit
 import psycopg
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -61,10 +62,14 @@ TLS = ssl.create_default_context(cafile=os.environ.get('TEST_CA_FILE'))
 # (served model, prompt tokens, completion tokens, cost estimate) of an attempt without a usable response.
 UNMEASURED = (None, None, None, None)
 DATABASE = os.environ['DATABASE_URL']
+# Test mode only: knowledge times (freshness, refresh schedule, activation) follow the Business's test clock, memory_now().
+TESTING = MODE == 'test'
 WORKER = f'{os.uname().nodename}-{uuid.uuid4()}'
 HOLD = re.compile(r'^\[hold (\d{1,2})s\]')
 FIELD = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,63}$')
 MAX_STEPS, MAX_AGENT_CALLS, MAX_HTTP_CALLS, HTTP_TIMEOUT, MAX_BODY = 20, 3, 5, 15, 262144
+# Website crawling: robots.txt rules for this product token, at most 100 pages per snapshot, 2 MB per page, five redirects per request.
+AGENT, MAX_PAGES, MAX_PAGE, MAX_REDIRECTS = 'CustomBotKnowledge', 100, 2_000_000, 5
 SIMULATED = ('Simulated reply: no AI model generated this text, and it contains no business facts. '
              'Connected generation is not configured for this conversation.')
 INTERRUPTED = ('This message was interrupted before a reply and was not retried automatically. '
@@ -264,12 +269,14 @@ def stale(connection, job, grants):
 
 
 def withdrawn(connection, versions):
-    """Whether any retrieved version's source has since been deleted or expired (a replacement does not withdraw it).
+    """Whether any retrieved version's source has since been deleted or expired, or (a website snapshot) has passed its 7 days of
+    freshness. A replacement does not withdraw it.
     Inside a transaction, after the conversation lock: the share locks on the sources make a concurrent deletion or expiry wait
     until this transaction commits, or show it; the conditions are on those locked rows, so they are rechecked after any wait."""
     live = connection.execute('SELECT v.id FROM source_versions v JOIN knowledge_sources s ON s.id=v.source_id WHERE v.id=ANY(%s) '
-                              'AND s.deleted_at IS NULL AND (s.expired_through IS NULL OR v.seq>s.expired_through) FOR SHARE OF s',
-                              (list(versions),)).fetchall()
+                              'AND s.deleted_at IS NULL AND (s.expired_through IS NULL OR v.seq>s.expired_through) '
+                              "AND (v.format<>'website' OR v.finished_at+interval '7 days'>memory_now(v.business_id,%s)) FOR SHARE OF s",
+                              (list(versions), TESTING)).fetchall()
     return len(live) != len(versions)
 
 
@@ -327,19 +334,21 @@ class Turn:
 
     def retrieve(self, step):
         """Top passages of the step's sources, from each source's current active version only: not deleted, this Business,
-        and embedded with the worker's current model and policy. Similarity ranks evidence; it is not a confidence threshold."""
+        embedded with the worker's current model and policy, and for a website refreshed successfully within the last 7 days
+        (documents have no such limit). Similarity ranks evidence; it is not a confidence threshold."""
         if not EMBEDDER:
             raise Stop(FAILED, 'knowledge unavailable: embedding model not installed')
         vector = literal(EMBEDDER.query(self.message))
         # The best passages of each source, so a lower-priority source can never crowd a higher-priority one out of the evidence.
         # ponytail: exact scan of the Business's passages, no vector index; add a filtered HNSW index when a Business outgrows it.
         rows = self.connection.execute(
-            "SELECT id,version_id,ref,document,page,content FROM (SELECT c.id,c.version_id,s.ref,v.document,c.page,c.content,"
+            "SELECT id,version_id,ref,document,page,content FROM (SELECT c.id,c.version_id,s.ref,coalesce(c.url,v.document) AS document,c.page,c.content,"
             "c.embedding <=> %s::vector AS distance,row_number() OVER (PARTITION BY c.source_id ORDER BY c.embedding <=> %s::vector) AS rank "
             "FROM source_chunks c JOIN knowledge_sources s ON s.id=c.source_id AND s.active_version_id=c.version_id "
             "JOIN source_versions v ON v.id=c.version_id WHERE c.business_id=%s AND s.business_id=%s AND s.deleted_at IS NULL "
-            "AND s.ref=ANY(%s) AND v.encoding=%s) ranked WHERE rank<=3 ORDER BY distance",
-            (vector, vector, self.job[1], self.job[1], step['sources'], EMBEDDER.encoding)).fetchall()
+            "AND s.ref=ANY(%s) AND v.encoding=%s AND (v.format<>'website' OR v.finished_at+interval '7 days'>(SELECT memory_now(%s,%s)))) ranked "
+            "WHERE rank<=3 ORDER BY distance",
+            (vector, vector, self.job[1], self.job[1], step['sources'], EMBEDDER.encoding, self.job[1], TESTING)).fetchall()
         priority = {s['id']: s['priority'] for s in self.document.get('sources', [])}
         self.evidence = self.evidence or []
         seen = {e['chunk'] for e in self.evidence}
@@ -710,14 +719,14 @@ def agent_output(data, final, allowed=(), shown=()):
     raise ValueError('outcome does not match the agent contract')
 
 
-def fetch(method, url, body, seconds, headers=None):
+def fetch(method, url, body, seconds, headers=None, page=False):
     """One HTTPS request under a wall-clock bound covering DNS, connect, headers and body. Redirects are never followed.
-    Business requests (those carrying credential headers) go only to vetted public addresses."""
+    Requests with headers (Business actions and website crawls) go only to vetted public addresses."""
     box = {}
 
     def attempt():
         try:
-            box['value'] = request(method, url, body, time.monotonic() + seconds, headers)
+            box['value'] = request(method, url, body, time.monotonic() + seconds, headers, page)
         except BaseException as failure:
             box['error'] = failure
     worker = threading.Thread(target=attempt, daemon=True)
@@ -765,7 +774,8 @@ class Pinned(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
 
-def request(method, url, body, deadline, headers=None):
+def request(method, url, body, deadline, headers=None, page=False):
+    """The response text; a page request instead returns (status, location, content type, bytes) for any status but 429/5xx."""
     parts = urlsplit(url)
     port, options = parts.port or 443, {'timeout': deadline - time.monotonic(), 'context': TLS}
     connection = (Pinned(parts.hostname, port, vetted(parts.hostname, port), **options) if headers is not None
@@ -777,21 +787,122 @@ def request(method, url, body, deadline, headers=None):
         response = connection.getresponse()
         if response.status == 429 or response.status >= 500:
             raise Transient(f'status {response.status}')
+        if page and not 200 <= response.status < 300:
+            return response.status, response.getheader('location'), None, b''
         if not 200 <= response.status < 300:
             raise Rejected(f'status {response.status}')
         data = bytearray()
         while chunk := response.read1(65536):
             data += chunk
-            if len(data) > MAX_BODY:
+            if len(data) > (MAX_PAGE if page else MAX_BODY):
                 raise Rejected('response too large')
             if time.monotonic() > deadline:
                 raise Transient('timed out')
+        if page:
+            return response.status, None, response.getheader('content-type') or '', bytes(data)
         try:
             return bytes(data).decode()
         except UnicodeDecodeError:
             raise Rejected('response is not text')
     finally:
         connection.close()
+
+
+def scoped(url, scope):
+    """Whether url lies inside the website scope: the same HTTPS origin, under its path prefix, without credentials, dot segments
+    or encoded separators that a server could decode back out of the prefix."""
+    try:
+        parts = urlsplit(url)
+        return (parts.scheme == 'https' and not parts.username and origin(parts) == origin(scope) and parts.path.startswith(scope.path)
+                and not {'.', '..'} & set(parts.path.split('/')) and not re.search(r'%(2e|2f|5c)|\\', parts.path, re.I))
+    except ValueError:
+        return False
+
+
+def crawl(start, required, renew):
+    """One complete snapshot of a website scope as [(page URL, text)], or Unreadable. The start URL and required pages must all be
+    fetched; from them, links are followed to every same-host page inside the scope that robots.txt permits. Every request and
+    redirect hop is checked against the scope and robots.txt and goes only to vetted public addresses. Discovering more than 100
+    permitted pages, a missing required page, or any page failing transiently (timeout, 429, 5xx) fails the whole snapshot;
+    a discovered page that is gone, not HTML, or redirected out of bounds is skipped."""
+    scope, seconds = urlsplit(start), min(HTTP_TIMEOUT, LEASE - 1)
+    headers = {'user-agent': f'{AGENT}/1.0', 'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9'}
+
+    def get(url, denied):
+        for _ in range(MAX_REDIRECTS + 1):
+            renew()
+            status, location, kind, body = fetch('GET', url, None, seconds, headers, page=True)
+            if not 300 <= status < 400:
+                return url, status, kind, body
+            url = urldefrag(urljoin(url, location or ''))[0]
+            if reason := denied(url):
+                raise Rejected(f'it redirects to {url}, which is {reason}')
+        raise Rejected('too many redirects')
+
+    # RFC 9309: a missing robots.txt (4xx) allows everything; 401/403 are treated as disallowing everything (as Python's parser
+    # does); an unreachable one stops the crawl, since its rules are unknown.
+    robots, home = urllib.robotparser.RobotFileParser(), origin(scope)
+    try:
+        _, status, _, body = get(f'{home}/robots.txt', lambda url: None if origin(urlsplit(url)) == home else 'on another host')
+    except (Transient, Rejected) as failure:
+        hint = '; website refresh needs outbound HTTPS (compose.connected.yaml)' if str(failure) == 'connection failed' else ''
+        raise knowledge.Unreadable(f'robots.txt of {home} could not be fetched ({failure}){hint}')
+    if 200 <= status < 300:
+        robots.parse(body.decode('utf-8', 'replace').splitlines())
+    elif status in (401, 403):
+        robots.disallow_all = True
+    else:
+        robots.allow_all = True
+
+    def denied(url):
+        return ('outside the approved scope' if not scoped(url, scope)
+                else 'disallowed by robots.txt' if not robots.can_fetch(AGENT, url) else None)
+
+    needed = list(dict.fromkeys([start, *required]))
+    queue, seen, fetched, pages = list(needed), set(needed), set(), []
+    for url in queue:
+        if reason := denied(url):
+            if url in needed:
+                raise knowledge.Unreadable(f'required page {url} is {reason}')
+            continue
+        try:
+            final, status, kind, body = get(url, denied)
+            if final in fetched:
+                continue
+            fetched.add(final)
+            if final not in seen:
+                seen.add(final)
+                if len(seen) > MAX_PAGES:
+                    raise knowledge.Unreadable(f'the scope has more than {MAX_PAGES} permitted pages; narrow the URL scope')
+            if not 200 <= status < 300:
+                raise Rejected(f'it returned status {status}')
+            mime = kind.split(';')[0].strip().lower()
+            if mime not in ('text/html', 'application/xhtml+xml'):
+                raise Rejected(f'it is not HTML ({mime or "no content type"})')
+            charset = re.search(r'charset="?([\w.:-]+)', kind, re.I)
+            try:
+                text = body.decode(charset[1] if charset else 'utf-8', 'replace')
+            except LookupError:
+                text = body.decode('utf-8', 'replace')
+            parsed = knowledge.Page(text)
+        except Rejected as failure:
+            if url in needed:
+                raise knowledge.Unreadable(f'required page {url} was not used: {failure}')
+            continue
+        except Transient as failure:
+            raise knowledge.Unreadable(f'{url} could not be fetched ({failure}); a snapshot is complete only with every permitted page')
+        if parsed.text:
+            pages.append((final, parsed.text))
+        elif url in needed:
+            raise knowledge.Unreadable(f'required page {url} has no readable text')
+        for link in parsed.links:
+            link = urldefrag(urljoin(final, link.strip()))[0]
+            if link not in seen and not denied(link):
+                seen.add(link)
+                if len(seen) > MAX_PAGES:
+                    raise knowledge.Unreadable(f'the scope has more than {MAX_PAGES} permitted pages; narrow the URL scope')
+                queue.append(link)
+    return pages
 
 
 def finish(connection, job, outcome, text=None, grants=(), versions=(), citations=(), permits={}, memory_state=None, memory_error=False):
@@ -898,19 +1009,24 @@ def settle(connection, job, error):
     takes them in the order source, job, version."""
     with connection.transaction():
         connection.execute("UPDATE jobs SET status='failed', lease_owner=NULL, error=%s WHERE id=%s", (error, job[0]))
-        connection.execute("UPDATE source_versions SET state='failed', error=%s, content=NULL, finished_at=clock_timestamp() "
-                           "WHERE id=%s AND state IN ('queued','running')", (error, job[2]))
+        connection.execute("UPDATE source_versions SET state='failed', error=%s, content=NULL, finished_at=memory_now(business_id,%s) "
+                           "WHERE id=%s AND state IN ('queued','running')", (error, TESTING, job[2]))
 
 
 def ingest(connection, job):
-    """Parse, chunk and embed one candidate version outside any transaction, then activate it atomically."""
+    """Parse or crawl, chunk and embed one candidate version outside any transaction, then activate it atomically."""
     if not EMBEDDER:
         return settle(connection, job, KNOWLEDGE)
-    row = connection.execute("SELECT format,content FROM source_versions WHERE id=%s AND state='running'", (job[2],)).fetchone()
-    if not row or row[1] is None:
+    row = connection.execute("SELECT format,content,document,required FROM source_versions WHERE id=%s AND state='running'", (job[2],)).fetchone()
+    # A website candidate has no stored bytes; a document's are erased by deletion or expiry.
+    website = row and row[0] == 'website'
+    if not row or (row[1] is None and not website):
         return settle(connection, job, 'source deleted or expired')
     try:
-        pages = knowledge.parse(row[0], bytes(row[1]), lambda: renew(connection, job))
+        if website:
+            pages = crawl(row[2], row[3] or [], lambda: renew(connection, job))
+        else:
+            pages = knowledge.parse(row[0], bytes(row[1]), lambda: renew(connection, job))
         passages = EMBEDDER.passages(pages, lambda: renew(connection, job))
         vectors = []
         for start in range(0, len(passages), 32):
@@ -920,7 +1036,8 @@ def ingest(connection, job):
         return settle(connection, job, str(failure))
     hold = HOLD.match(pages[0][1]) if MODE == 'test' else None
     for _ in range(min(int(hold[1]), 30) if hold else 0):
-        # Test only: a document starting "[hold Ns]" waits before activation, so deletion and replacement can race it.
+        # Test only: a document (or a website's first page) starting "[hold Ns]" waits before activation, so deletion and
+        # replacement can race it.
         renew(connection, job)
         time.sleep(1)
     with connection.transaction():
@@ -933,9 +1050,10 @@ def ingest(connection, job):
         activate = source[1] and not (source[3] is not None and source[3] >= source[4])
         if activate:
             with connection.cursor() as cursor:
-                cursor.executemany("INSERT INTO source_chunks(business_id,source_id,version_id,ordinal,page,content,embedding) "
-                                   "VALUES(%s,%s,%s,%s,%s,%s,%s::vector)",
-                                   [(job[1], source[0], job[2], n, page, text, literal(vector))
+                # A website passage's "page" is the URL it came from.
+                cursor.executemany("INSERT INTO source_chunks(business_id,source_id,version_id,ordinal,page,url,content,embedding) "
+                                   "VALUES(%s,%s,%s,%s,%s,%s,%s,%s::vector)",
+                                   [(job[1], source[0], job[2], n, None if website else page, page if website else None, text, literal(vector))
                                     for n, ((page, text, _), vector) in enumerate(zip(passages, vectors))])
             if source[2]:
                 # The replaced version is no longer retrievable or re-indexable: its passages and bytes go.
@@ -944,25 +1062,45 @@ def ingest(connection, job):
             connection.execute('UPDATE knowledge_sources SET active_version_id=%s WHERE id=%s', (job[2], source[0]))
         connection.execute("UPDATE jobs SET status=%s, lease_owner=NULL, error=%s WHERE id=%s",
                            ('completed', None, job[0]) if activate else ('failed', 'superseded or deleted', job[0]))
-        connection.execute("UPDATE source_versions SET state=%s, encoding=%s, passages=%s, content=CASE WHEN %s THEN content END, "
-                           "finished_at=clock_timestamp() WHERE id=%s AND state='running'",
-                           ('active' if activate else 'superseded', EMBEDDER.encoding, len(passages), activate, job[2]))
+        # A website's freshness runs from this activation.
+        connection.execute("UPDATE source_versions SET state=%s, encoding=%s, passages=%s, pages=%s, content=CASE WHEN %s THEN content END, "
+                           "finished_at=memory_now(business_id,%s) WHERE id=%s AND state='running'",
+                           ('active' if activate else 'superseded', EMBEDDER.encoding, len(passages), len(pages) if website else None, activate, TESTING, job[2]))
+
+
+def requeue(connection, business, version):
+    """A new candidate from a version's document or website scope, with its ingestion job. Inside the caller's transaction."""
+    candidate = uuid.uuid4()
+    connection.execute("INSERT INTO source_versions(id,business_id,source_id,document,format,size,content,required) "
+                       "SELECT %s,business_id,source_id,document,format,size,content,required FROM source_versions WHERE id=%s", (candidate, version))
+    connection.execute("INSERT INTO jobs(id,business_id,kind,version_id,idempotency_key,deadline) "
+                       "VALUES(gen_random_uuid(),%s,'ingest',%s,%s,clock_timestamp()+interval '1 hour')", (business, candidate, f'ingest:{candidate}'))
 
 
 def reindex(connection):
     """Active versions embedded under another model or policy are never compared with today's queries; queue a complete new
-    candidate from the same document for each. It activates only when complete, like any replacement."""
+    candidate from the same document (or a fresh crawl of the same website scope) for each. It activates only when complete."""
     with connection.transaction():
         for business, source, version in connection.execute(
                 "SELECT s.business_id,s.id,a.id FROM knowledge_sources s JOIN source_versions a ON a.id=s.active_version_id "
                 "WHERE s.deleted_at IS NULL AND a.encoding<>%s AND NOT EXISTS(SELECT 1 FROM source_versions c WHERE c.source_id=s.id "
                 "AND c.state IN ('queued','running')) FOR UPDATE OF s SKIP LOCKED", (EMBEDDER.encoding,)).fetchall():
-            candidate = uuid.uuid4()
-            connection.execute("INSERT INTO source_versions(id,business_id,source_id,document,format,size,content) "
-                               "SELECT %s,business_id,source_id,document,format,size,content FROM source_versions WHERE id=%s", (candidate, version))
-            connection.execute("INSERT INTO jobs(id,business_id,kind,version_id,idempotency_key,deadline) "
-                               "VALUES(gen_random_uuid(),%s,'ingest',%s,%s,clock_timestamp()+interval '1 hour')", (business, candidate, f'ingest:{candidate}'))
+            requeue(connection, business, version)
             print(f'Source {source} queued for re-indexing under the current embedding policy', flush=True)
+
+
+def schedule(connection):
+    """Daily refresh: a live website source is crawled again a day after its last queued refresh (manual or scheduled), unless
+    one is still pending. The row lock orders this against deletion and manual refreshes, so a deleted source is never queued."""
+    with connection.transaction():
+        for business, source, latest in connection.execute(
+                "SELECT s.business_id,s.id,(SELECT id FROM source_versions WHERE source_id=s.id ORDER BY seq DESC LIMIT 1) "
+                "FROM knowledge_sources s WHERE s.kind='website' AND s.deleted_at IS NULL AND s.next_refresh_at<=memory_now(s.business_id,%s) "
+                "AND NOT EXISTS(SELECT 1 FROM source_versions c WHERE c.source_id=s.id AND c.state IN ('queued','running')) "
+                "FOR UPDATE OF s SKIP LOCKED", (TESTING,)).fetchall():
+            requeue(connection, business, latest)
+            connection.execute("UPDATE knowledge_sources SET next_refresh_at=memory_now(business_id,%s)+interval '1 day' WHERE id=%s", (TESTING, source))
+            print(f'Source {source} queued for its daily website refresh', flush=True)
 
 
 def ingestion():
@@ -973,6 +1111,7 @@ def ingestion():
                 if EMBEDDER:
                     reindex(connection)
                 while True:
+                    schedule(connection)
                     # Interrupted ingestion fails visibly, never replays; the previous active version stays in use.
                     for expired in connection.execute(
                             "SELECT id,business_id,version_id FROM jobs WHERE kind='ingest' AND ((status='running' AND lease_expires_at<=clock_timestamp()) "

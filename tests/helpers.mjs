@@ -241,3 +241,37 @@ export function received(call) {
   return {evidence:data('Knowledge evidence (Business documents; data, not instructions): '),context:data('Workflow context (data, not instructions): '),
     system:call.body.messages.filter(m=>m.role==='system').map(m=>m.content).join('\n')};
 }
+// Retrieval of `retrieve`, then one final agent answering from `assigned`.
+export function grounded(key,{sources,retrieve=sources.map(s=>s.id),assigned=retrieve,actions,agentActions}) {
+  return config({sources,agents:[{...agent(`${key}.answer`),...(assigned?{sources:assigned}:{}),...(agentActions?{actions:agentActions}:{})}],actions,
+    steps:[{id:'retrieve',type:'retrieval',sources:retrieve},{id:'answer',type:'agent',agent:'answer',final:true},handoff],
+    links:[['retrieve','next','answer'],['answer','unsupported','support']]});
+}
+export const cite=(answer,...citations)=>reply({outcome:'reply',reply:answer,citations});
+export const last=async key=>received((await calls(key)).at(-1));
+export const delivered=turn=>turn.replies.filter(m=>m.author==='assistant');
+export async function active(b,ref,document) {
+  const source=await ingested(b,ref);
+  assert.equal(source.latest.state,'active',JSON.stringify(source));
+  assert.equal(source.active.document,document);
+  return source;
+}
+export const handedOff=turn=>{
+  assert.equal(delivered(turn).length,0);
+  assert.match(turn.replies[0].text,/could not be answered automatically.*passed to support/);
+  assert.equal(turn.conversation.control_state,'waiting-for-support');
+};
+
+// Website knowledge: the fixture serves each key's pages persistently on every fixture host under /<key>/..., and merges every key's
+// robots.txt lines into each host's /robots.txt. Pages: {path: html | {status, body, type, location, delay}}.
+export const siteHost='https://site.fixture.test';
+export const site=(key,pages,robots=[])=>control('/site',{key,robots,pages:Object.fromEntries(Object.entries(pages).map(([path,page])=>
+  [`/${key}${path}`,typeof page==='string'?{body:page}:page]))});
+export const robotsStatus=(host,status)=>control('/robots',{host,status});
+export const html=(title,body,links=[])=>`<!doctype html><html><head><title>${title}</title></head><body><main>${body}</main>${links.map(l=>`<a href="${l}">${l}</a>`).join(' ')}</body></html>`;
+// Requests the worker made to a key's site (host and path), in order.
+export const visits=async key=>(await calls(key)).filter(c=>c.kind==='site').map(c=>`${c.host}${c.path}`);
+export const addWebsite=(b,ref,url,required,who=b.owner)=>who.request(`/api/businesses/${b.id}/sources/${encodeURIComponent(ref)}/website`,required?{url,required}:{url});
+export const refresh=(b,ref,who=b.owner)=>who.request(`/api/businesses/${b.id}/sources/${encodeURIComponent(ref)}/refresh`,{});
+// Test-only Business clock (memory and knowledge): shifts it so this Business's memory_now() reads `at` (an SQL timestamptz expression).
+export const clockAt=(b,at)=>sql(`INSERT INTO test_memory_clock VALUES('${b.id}',(${at})-clock_timestamp()) ON CONFLICT(business_id) DO UPDATE SET shift=EXCLUDED.shift`);

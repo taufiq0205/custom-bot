@@ -114,6 +114,14 @@
 <label>Document <input name="file" type="file" required accept=".pdf,.docx,.txt,.md,.markdown"></label>
 <button class="btn-primary">Upload document</button>
 </form>
+<h3>Websites</h3>
+<p class="help">Approve one public HTTPS URL scope ending in /. Each refresh follows links to same-host pages under that path that robots.txt permits, at most 100 pages, and must include any pages you list as required. A snapshot is used only once every page is complete; otherwise answers keep the previous one. Websites refresh daily and on request, and stop answering 7 days after their last successful refresh.</p>
+<form id="website-add" class="inline-form">
+<label>Website source ID <input name="ref" required maxlength="100" autocomplete="off"></label>
+<label>Website URL <input name="url" type="url" required maxlength="200" placeholder="https://shop.example.com/help/"></label>
+<label>Required pages <textarea name="required" rows="2" placeholder="Optional: one page URL inside the scope per line"></textarea></label>
+<button class="btn-primary">Add website</button>
+</form>
 <ul id="knowledge-sources" class="rows"></ul>
 </div>
 </section>
