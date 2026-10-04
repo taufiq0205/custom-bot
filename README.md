@@ -55,7 +55,7 @@ Schema version 1. Top-level fields:
 - `generation`: `{mode: "simulation" | "connected"}`.
 - optional `decision`: `{engine: "jev" | "laya" | "von", model?}`.
 - optional `sources`: `[{id, priority: 1–1000}]`. A source `id` names the Knowledge source uploaded under that ID. When passages conflict, the lower priority number takes precedence.
-- `agents`: `[{id, name, instructions, sources?, actions?, model?: {provider: "deepseek" | "qwen", name, temperature?: 0–2, max_tokens?: 1–8192, fallback?: {provider: "qwen", name}}}]`. Only a DeepSeek model may name a fallback (see Providers). Model names are free choices; the evaluated candidates are `deepseek-flash` and `qwen3.7-plus-2026-05-26`.
+- `agents`: `[{id, name, instructions, sources?, actions?, model?: {provider: "deepseek" | "qwen", name, temperature?: 0–2, max_tokens?: 1–8192, fallback?: {provider: "qwen", name}}}]`. Only a DeepSeek model may name a fallback (see Providers). Model names are free choices; the evaluated candidates are `deepseek-flash` (which DeepSeek serves with DeepSeek-V4.1-Flash) and `qwen3.7-plus-2026-05-26`.
 - `actions`: `[{id, method: "GET", url, input_schema, result_schema, credential, authorization, timeout_ms: 1–15000}]`. `credential` and `authorization` are references, never secret values. Schemas use a JSON Schema subset: `type`, `properties`, `required`, `items` and `description`.
 - `workflow`: `{entry, steps, connections}`.
 

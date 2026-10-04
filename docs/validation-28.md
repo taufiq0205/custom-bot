@@ -73,7 +73,15 @@ A first "third attempt" mutant (`for tries in (1, 2, 3)` alone) survived because
 
 ## Real integration run (pending)
 
-Prerequisites: real `DEEPSEEK_API_KEY` and a Singapore/International `DASHSCOPE_API_KEY` in `.env`, and outbound network. Procedure: `docker compose -f compose.yaml -f compose.connected.yaml up -d --wait`; create a Business; allow DeepSeek and Qwen generation; publish one final agent `deepseek/deepseek-flash` with fallback `qwen/qwen3.7-plus-2026-05-26`, and a second whose model is the Qwen candidate directly; send Customer messages; record the reply, attempt rows (served model, tokens, latency) and log lines. The Qwen leg checks the exact endpoint, key, model access and `enable_thinking: false`.
+Plan change (2026-10-04, from the user): no Qwen key is available, so only DeepSeek can be run for real. The DeepSeek model stays `deepseek-flash`. DeepSeek's documentation says that ID is served by DeepSeek-V4.1-Flash, and `deepseek-v4.1-flash` is not a documented ID. The real run records the served model, which shows the actual version.
+
+DeepSeek leg (to run once `DEEPSEEK_API_KEY` is in `.env`):
+1. `docker compose -f compose.yaml -f compose.connected.yaml up -d --wait --remove-orphans`.
+2. Create a Business, allow DeepSeek generation, and publish one final agent with `deepseek/deepseek-flash` and no fallback.
+3. Send Customer messages. Record the reply, the attempt rows (served model, tokens, latency) and the log lines.
+4. Check that the key appears in no payload, row or log, without printing it.
+
+Qwen leg: **blocked until a Singapore/International `DASHSCOPE_API_KEY` exists.** Until then, real Qwen endpoint, key and model access, and acceptance of `enable_thinking: false`, are unestablished. Without that key, a configured fallback cannot run: a transient DeepSeek failure hands off with `qwen fallback unavailable: DASHSCOPE_API_KEY not set` (Keyless test). So configure no `fallback` until the key exists.
 
 ## Not established by this slice
 
@@ -93,4 +101,5 @@ Prerequisites: real `DEEPSEEK_API_KEY` and a Singapore/International `DASHSCOPE_
 | Affected files `workflow`, `actions`, `chat`, `configuration` | 24/24 pass |
 | `caffeinate -i npm test`, full run after the review fixes (2026-10-04, 22.0 min) | **62/62 pass, 0 failed assertions**, and no worker tracebacks |
 | After the readiness wording and `--remove-orphans` fix: `node --test --test-concurrency=1 tests/providers.test.mjs tests/chat.test.mjs` | 10/10 pass (an earlier run without `--test-concurrency=1` ran the files in parallel and failed two concurrency-sensitive assertions; that was a command error) |
-| Real DeepSeek and Qwen integration run | **Not yet run: pending real keys.** Until it passes, actual account/model access, real output validity, `enable_thinking: false` acceptance and real usage reporting are unestablished, and this ticket is incomplete. |
+| Real DeepSeek integration run | **Not yet run: pending `DEEPSEEK_API_KEY`.** Until it passes, actual account/model access, real output validity and real usage reporting are unestablished. |
+| Real Qwen integration run | **Blocked: no Qwen key available.** The fallback criterion is fixture-verified only, and this ticket stays incomplete on that point. |
