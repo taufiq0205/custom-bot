@@ -71,15 +71,27 @@ A first "third attempt" mutant (`for tries in (1, 2, 3)` alone) survived because
 - **Duplication and naming:** provider/operation lists built the route from one place; the UI takes roles from the worker report; the permission revision and the empty measurement are named; `PROVIDER_RATES` is validated without `assert`.
 - **Missing validation record:** this file.
 
-## Real integration run (pending)
+## Real integration run
 
 Plan change (2026-10-04, from the user): no Qwen key is available, so only DeepSeek can be run for real. The DeepSeek model stays `deepseek-flash`. DeepSeek's documentation says that ID is served by DeepSeek-V4.1-Flash, and `deepseek-v4.1-flash` is not a documented ID. The real run records the served model, which shows the actual version.
 
-DeepSeek leg (to run once `DEEPSEEK_API_KEY` is in `.env`):
-1. `docker compose -f compose.yaml -f compose.connected.yaml up -d --wait --remove-orphans`.
-2. Create a Business, allow DeepSeek generation, and publish one final agent with `deepseek/deepseek-flash` and no fallback.
-3. Send Customer messages. Record the reply, the attempt rows (served model, tokens, latency) and the log lines.
-4. Check that the key appears in no payload, row or log, without printing it.
+DeepSeek leg, **run 2026-10-04** with the user's real `DEEPSEEK_API_KEY` (worker only), `docker compose -f compose.yaml -f compose.connected.yaml up --build -d --wait --remove-orphans`, and no `PROVIDER_RATES`. It went through the public Operator and Customer APIs: a fresh Business, DeepSeek generation allowed, and published version 2 with one final agent `deepseek/deepseek-flash` (temperature 0.2, max_tokens 400, no fallback) answering from bookshop opening hours in its instructions.
+
+| Customer message | Outcome | Attempt (served model, prompt/completion tokens, attempt time) |
+| --- | --- | --- |
+| Are you open on Saturday? | Delivered, `simulated: false`: "No — we're closed on weekends. We're open Monday to Friday, 09:00-17:00." | succeeded, `deepseek-flash`, 152/62, 1.01 s |
+| What time do you close on Wednesdays? | Delivered: "We close at 17:00 on Wednesdays." | succeeded, `deepseek-flash`, 156/81, 1.03 s |
+| Can you tell me the price of a first-edition Dune? | The model answered `unsupported`; the conversation went to support (`workflow-handoff`), and no text was delivered | succeeded, `deepseek-flash`, 160/27, 0.55 s |
+| Hello? (agent model `deepseek-v4.1-flash`, in another Business) | DeepSeek rejected the model name. One attempt, no retry; handed to support as `automation-failure` | failed, `status 400`, 0.26 s |
+
+What this establishes:
+- Real account and model access for `deepseek-flash`.
+- Valid real JSON-mode output through the agent contract, and real usage reporting.
+- The Owner listing names the selected model.
+- The model's real abstention path goes to support.
+- `deepseek-v4.1-flash` is not an accepted ID: the API returns `400`. DeepSeek reports the served model only as `deepseek-flash`, so the V4.1-Flash version comes from DeepSeek's documentation, not from this run.
+
+Redaction with the real key, counted without printing it (all `0`): `docker compose logs app worker`, a `pg_dump --data-only`, the app container's environment, and readiness. Cost is null because no rates were configured.
 
 Qwen leg: **blocked until a Singapore/International `DASHSCOPE_API_KEY` exists.** Until then, real Qwen endpoint, key and model access, and acceptance of `enable_thinking: false`, are unestablished. Without that key, a configured fallback cannot run: a transient DeepSeek failure hands off with `qwen fallback unavailable: DASHSCOPE_API_KEY not set` (Keyless test). So configure no `fallback` until the key exists.
 
@@ -101,5 +113,5 @@ Qwen leg: **blocked until a Singapore/International `DASHSCOPE_API_KEY` exists.*
 | Affected files `workflow`, `actions`, `chat`, `configuration` | 24/24 pass |
 | `caffeinate -i npm test`, full run after the review fixes (2026-10-04, 22.0 min) | **62/62 pass, 0 failed assertions**, and no worker tracebacks |
 | After the readiness wording and `--remove-orphans` fix: `node --test --test-concurrency=1 tests/providers.test.mjs tests/chat.test.mjs` | 10/10 pass (an earlier run without `--test-concurrency=1` ran the files in parallel and failed two concurrency-sensitive assertions; that was a command error) |
-| Real DeepSeek integration run | **Not yet run: pending `DEEPSEEK_API_KEY`.** Until it passes, actual account/model access, real output validity and real usage reporting are unestablished. |
+| Real DeepSeek integration run (2026-10-04) | **Pass:** 3 real turns: 2 replies delivered, 1 correct abstention handed off. A rejected model name hands off without retry. Real-key redaction count 0 in logs, database, app env and readiness. |
 | Real Qwen integration run | **Blocked: no Qwen key available.** The fallback criterion is fixture-verified only, and this ticket stays incomplete on that point. |
