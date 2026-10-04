@@ -103,6 +103,21 @@ async function refreshMemberships() {
     button.addEventListener('click',()=>run(async()=>{await request(path+'/website-origins',{origin,approved:false});status.textContent='Website origin removed.';}));
     li.append(button);return li;
   }));
+  // Generation permissions only; extraction permissions arrive with Customer memory.
+  const {permissions,providers}=await request(path+'/provider-permissions');
+  const shown=[['deepseek','DeepSeek','final replies'],['qwen','Qwen','one fallback attempt after a transient DeepSeek failure']];
+  document.querySelector('#providers').replaceChildren(...shown.map(([id,name,role])=>{
+    const li=document.createElement('li'),label=document.createElement('label'),box=document.createElement('input');
+    box.type='checkbox';box.checked=permissions.some(p=>p.provider===id&&p.operation==='generation'&&p.allowed);
+    box.addEventListener('change',()=>run(async()=>{await request(`${path}/provider-permissions/${id}/generation`,{allowed:box.checked});
+      status.textContent=`${name} generation ${box.checked?'allowed':'not allowed'}.`;}));
+    label.append(box,` Allow ${name} generation`);
+    const report=providers?.[id];
+    li.append(Object.assign(document.createElement('span'),{textContent:`${name}: ${role}`}),label,
+      Object.assign(document.createElement('p'),{className:'help',textContent:report?`Endpoint ${report.endpoint}. Key ${report.key}.`:'Worker readiness unavailable.'}));
+    if(report?.processing)li.append(Object.assign(document.createElement('p'),{className:'warning',textContent:`Processing: ${report.processing}.`}));
+    return li;
+  }));
 }
 document.querySelector('#origin').addEventListener('submit',event=>{
   event.preventDefault();const origin=new FormData(event.currentTarget).get('origin');

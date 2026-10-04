@@ -4,7 +4,8 @@ import { createCipheriv, randomBytes } from 'node:crypto';
 import { credentialKey, pool } from './config.js';
 import { FIELD, publicHttps, REF } from './configuration.js';
 import { body, Failure, keys, uuid } from './memberships.js';
-const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63}))$`);
+const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63})|(provider-permissions)(?:/(deepseek|qwen)/(generation|extraction))?)$`);
+const PROVIDERS=['deepseek','qwen'],OPERATIONS=['generation','extraction'];
 // Visible ASCII; no CR/LF can reach a request header.
 const SECRET=/^[\x21-\x7e](?:[\x20-\x7e]{0,4094}[\x21-\x7e])?$/;
 
@@ -15,11 +16,12 @@ function seal(business:string,ref:string,secret:string) {
   return Buffer.concat([nonce,cipher.update(secret,'utf8'),cipher.final(),cipher.getAuthTag()]);
 }
 
-// Owner-only live action controls. Secrets are write-only: no response ever contains one.
+// Owner-only live action controls and provider permissions. Secrets are write-only: no response ever contains one.
 export async function actions(req:IncomingMessage,path:string,user:{id:string},json:(status:number,value:unknown)=>void) {
   const match=path.match(route);
   if(!match)return false;
-  const [,business,listing,resource,ref,revoke,action]=match;
+  const [,business,controls,resource,ref,revoke,action,permissions,provider,operation]=match;
+  const listing=controls||(permissions&&!provider);
   let client:PoolClient|undefined;
   try {
     if(req.method!==(listing?'GET':'POST'))throw new Failure(404,'Not found');
@@ -30,10 +32,23 @@ export async function actions(req:IncomingMessage,path:string,user:{id:string},j
     await client.query(`SELECT id FROM businesses WHERE id=$1 ${listing?'FOR SHARE':'FOR NO KEY UPDATE'}`,[business]);
     if(!(await client.query("SELECT 1 FROM memberships WHERE business_id=$1 AND operator_id=$2 AND active AND role='Owner'",[business,user.id])).rowCount)throw new Failure(404,'Business not found');
     let result;
-    if(listing) {
+    if(listing&&permissions) {
+      // Every provider/operation pair, off unless granted, with the worker's key/endpoint readiness (never key values).
+      const granted=(await client.query('SELECT provider,operation,allowed,revision,updated_at FROM provider_permissions WHERE business_id=$1',[business])).rows;
+      const worker=(await client.query("SELECT generation FROM worker_health WHERE id='worker'")).rows[0];
+      result={permissions:PROVIDERS.flatMap(p=>OPERATIONS.map(o=>granted.find(g=>g.provider===p&&g.operation===o)??{provider:p,operation:o,allowed:false,revision:null,updated_at:null})),
+        providers:worker?.generation??null};
+    } else if(listing) {
       result={credentials:(await client.query('SELECT ref,origin,header,active,revision,updated_at FROM action_credentials WHERE business_id=$1 ORDER BY ref',[business])).rows,
         policies:(await client.query('SELECT ref,customer_parameter,owner_field,active,revision,updated_at FROM authorization_policies WHERE business_id=$1 ORDER BY ref',[business])).rows,
         revoked_actions:(await client.query('SELECT action_id,revoked_at FROM action_revocations WHERE business_id=$1 ORDER BY action_id',[business])).rows};
+    } else if(provider) {
+      keys(input,['allowed']);
+      if(typeof input.allowed!=='boolean')throw new Failure(400,'Provide allowed (true or false)');
+      // Every change bumps the revision, so the worker discards outputs produced under the previous permission.
+      result=(await client.query(`INSERT INTO provider_permissions(business_id,provider,operation,allowed,updated_by) VALUES($1,$2,$3,$4,$5)
+        ON CONFLICT(business_id,provider,operation) DO UPDATE SET allowed=EXCLUDED.allowed,revision=provider_permissions.revision+1,
+        updated_by=EXCLUDED.updated_by,updated_at=clock_timestamp() RETURNING provider,operation,allowed,revision,updated_at`,[business,provider,operation,input.allowed,user.id])).rows[0];
     } else if(action) {
       keys(input,['revoked']);
       if(typeof input.revoked!=='boolean')throw new Failure(400,'Provide revoked (true or false)');

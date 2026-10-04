@@ -101,8 +101,14 @@ export const sql=query=>compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','
 export const reply=value=>({content:JSON.stringify(value)});
 // A business API response for the requesting verified Customer: the fixture copies the request's customer parameter into customer_id.
 export const owned=(json,extra={})=>({json,owner:'customer_id',...extra});
-// Every agent calls the fixture provider; its key travels in the instructions. HTTP keys travel in the action URL path.
-export const agent=key=>({id:key.split('.').at(-1),name:key,instructions:`fixture-key:${key} Help the Customer.`,model:{provider:'deepseek',name:'fixture'}});
+// Every agent calls the fixture provider (answering as api.deepseek.com); its key travels in the instructions. HTTP keys travel in the action URL path.
+export const agent=key=>({id:key.split('.').at(-1),name:key,instructions:`fixture-key:${key} Help the Customer.`,model:{provider:'deepseek',name:'deepseek-flash'}});
+// An Owner's live permission to send this Business's data to a provider for an operation.
+export const permit=async(b,provider,allowed,operation='generation')=>{
+  const changed=await b.owner.request(`/api/businesses/${b.id}/provider-permissions/${provider}/${operation}`,{allowed});
+  assert.equal(changed.status,200,JSON.stringify(changed.data));
+  return changed.data;
+};
 export const action=(id,key,extra={})=>({id,method:'GET',url:`https://orders.fixture.test/${key}/orders`,
   input_schema:{type:'object',properties:{order_id:{type:'string',description:'your order number'}},required:['order_id']},
   result_schema:{type:'object',properties:{status:{type:'string'}},required:['status']},
@@ -120,8 +126,9 @@ async function website(issuer) {
   return {publicJwk:await exportJWK(publicKey),sign:(business,sub)=>{const iat=Math.floor(Date.now()/1000);
     return new SignJWT({iss:issuer,aud:audience,business_id:business,sub,iat,exp:iat+600,jti:crypto.randomUUID()}).setProtectedHeader({alg:'ES256',kid:'site'}).sign(privateKey);}};
 }
-// A Business whose website signs in Customers, with an orders credential (sent only to orders.fixture.test) and an ownership policy.
-export async function business(prefix,{secret=`secret-${crypto.randomUUID()}`,owner}={}) {
+// A Business whose website signs in Customers, with an orders credential (sent only to orders.fixture.test), an ownership policy
+// and, unless generation is false, permission for DeepSeek generation.
+export async function business(prefix,{secret=`secret-${crypto.randomUUID()}`,owner,generation=true}={}) {
   owner??=await operator(prefix);
   const id=(await owner.request('/api/businesses',{name:`${prefix} Business`})).data.id;
   const site=await website(workflowSite);
@@ -129,7 +136,9 @@ export async function business(prefix,{secret=`secret-${crypto.randomUUID()}`,ow
   assert.equal((await owner.request(`/api/businesses/${id}/customer-keys`,{kid:'site',issuer:workflowSite,public_key:site.publicJwk})).status,201);
   assert.equal((await owner.request(`/api/businesses/${id}/credentials`,{ref:'orders-key',origin:'https://orders.fixture.test',header:'x-api-key',secret})).status,200);
   assert.equal((await owner.request(`/api/businesses/${id}/authorization-policies`,{ref:'own-orders',customer_parameter:'customer',owner_field:'customer_id'})).status,200);
-  return {owner,id,site,secret,controls:path=>`/api/businesses/${id}/${path}`};
+  const b={owner,id,site,secret,controls:path=>`/api/businesses/${id}/${path}`};
+  if(generation)await permit(b,'deepseek',true);
+  return b;
 }
 export async function publish(b,doc) {
   const path=`/api/businesses/${b.id}/configuration`;

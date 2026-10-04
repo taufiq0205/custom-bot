@@ -120,7 +120,7 @@ test('Website chat: duplicate submissions deliver exactly one message and turn, 
 
 test('Website chat: worker leases, crash and late results without replay, restart persistence',async()=>{
   const readiness=await fetch(base+'/health/ready').then(r=>r.json());
-  assert.equal(readiness.generation,'simulation');
+  assert.equal(readiness.generation.simulation,'always available, labelled as simulated');
   const {business}=await chatBusiness('chat-runtime');
   const session=await start(business);
   const send=(id,text)=>session.request(session.path+'/messages',{client_submission_id:id,text});
@@ -170,7 +170,7 @@ test('Website chat: worker leases, crash and late results without replay, restar
   // The seeded starting configuration cannot be changed, even outside the API.
   for(const sql of [`UPDATE published_configurations SET document='{}' WHERE business_id='${business.id}'`,`DELETE FROM published_configurations WHERE business_id='${business.id}'`])
     assert.throws(()=>compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','-U','custom_bot','-d','custom_bot','-tAc',sql),e=>e.stderr.includes('Published configurations are immutable'));
-  // A pinned non-simulation configuration fails visibly; no provider keys reach the worker, so nothing claims real inference.
+  // A pinned connected configuration whose agent has no model fails visibly, so nothing claims real inference.
   compose('exec','-T','db','psql','-v','ON_ERROR_STOP=1','-U','custom_bot','-d','custom_bot','-tAc',
     `INSERT INTO published_configurations(business_id,version,document) VALUES('${business.id}',2,jsonb_set(starting_configuration(),'{generation,mode}','"connected"'))`);
   const connected=await session.request(`${business.id}/conversations`,{});
@@ -186,8 +186,9 @@ test('Website chat: worker leases, crash and late results without replay, restar
   assert.match(unavailable.messages[1].text,/connected generation is unavailable/);
   assert.match(unavailable.messages[2].text,/^Waiting for support/);
   assert.equal(unavailable.control_state,'waiting-for-support');
-  const workerEnv=compose('exec','-T','worker','env');
-  for(const name of ['DEEPSEEK_API_KEY','DASHSCOPE_API_KEY','TYPESAFE_API_KEY'])assert.equal(workerEnv.includes(name),false);
+  // Provider keys reach only the worker (the test stack's are synthetic), never the app.
+  const appEnv=compose('exec','-T','app','env');
+  for(const name of ['DEEPSEEK_API_KEY','DASHSCOPE_API_KEY','TYPESAFE_API_KEY'])assert.equal(appEnv.includes(name),false);
   // Test job controls are refused outside test mode.
   assert.throws(()=>execFileSync('docker',['compose','-f','compose.yaml','-f','compose.test.yaml','run','--rm','--no-deps','-e','APP_MODE=local','worker'],{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000}),e=>e.stderr.includes('test-only'));
   const logs=compose('logs','app','worker');

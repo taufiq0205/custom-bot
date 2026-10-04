@@ -1,0 +1,6 @@
+# Connected generation: lets the worker make outbound HTTPS calls to its providers (and Business action APIs).
+# docker compose -f compose.yaml -f compose.connected.yaml up -d --wait
+# Never combine with compose.test.yaml: tests prove the worker runs without egress.
+services:
+  worker:
+    networks: [internal, web]

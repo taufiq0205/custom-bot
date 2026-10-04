@@ -1,6 +1,6 @@
 # Custom Bot
 
-Slices 1–8 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, human takeover through a shared support inbox, bounded execution of the published workflow, authorized live order lookups through Owner-controlled read-only HTTPS actions, the visual workflow editor, and document knowledge with local embeddings and cited answers. The archived configuration prototype remains an interaction reference. Website knowledge and provider inference belong to later slices.
+Slices 1–8 of [the platform specification](https://github.com/taufiq0205/custom-bot/issues/12): Docker launch, verified Operator email/password access, recovery, durable Business creation as Owner, Business Membership invitations, role changes and revocation, durable anonymous website chat with labelled simulated replies, verified Customer identity from Business websites, Owner-only JSON configuration drafts with explicit immutable publication, human takeover through a shared support inbox, bounded execution of the published workflow, authorized live order lookups through Owner-controlled read-only HTTPS actions, the visual workflow editor, document knowledge with local embeddings and cited answers, and DeepSeek generation with one permitted Qwen fallback. The archived configuration prototype remains an interaction reference. Website knowledge and memory extraction belong to later slices.
 
 Requires Docker Compose v2, arm64 or amd64, and free local ports 3100/8025. The first build downloads pinned images and locked dependencies. No cloud keys or model downloads are needed: document knowledge is optional and needs a one-time `docker compose run --rm models` (see Knowledge and [docs/models.md](docs/models.md)).
 
@@ -55,7 +55,7 @@ Schema version 1. Top-level fields:
 - `generation`: `{mode: "simulation" | "connected"}`.
 - optional `decision`: `{engine: "jev" | "laya" | "von", model?}`.
 - optional `sources`: `[{id, priority: 1–1000}]`. A source `id` names the Knowledge source uploaded under that ID. When passages conflict, the lower priority number takes precedence.
-- `agents`: `[{id, name, instructions, sources?, actions?, model?: {provider: "deepseek" | "qwen", name, temperature?: 0–2, max_tokens?: 1–8192}}]`.
+- `agents`: `[{id, name, instructions, sources?, actions?, model?: {provider: "deepseek" | "qwen", name, temperature?: 0–2, max_tokens?: 1–8192, fallback?: {provider: "qwen", name}}}]`. Only a DeepSeek model may name a fallback (see Providers). Model names are free choices; the evaluated candidates are `deepseek-flash` and `qwen3.7-plus-2026-05-26`.
 - `actions`: `[{id, method: "GET", url, input_schema, result_schema, credential, authorization, timeout_ms: 1–15000}]`. `credential` and `authorization` are references, never secret values. Schemas use a JSON Schema subset: `type`, `properties`, `required`, `items` and `description`.
 - `workflow`: `{entry, steps, connections}`.
 
@@ -75,7 +75,7 @@ New Businesses start with a publishable simulation draft: one agent with its `un
 
 ## Website chat (simulated)
 
-Every Business starts with an immutable, system-published configuration version 1 whose generation mode is `simulation`; it is created with the Business (and backfilled for existing ones) and cannot be updated or deleted. No provider keys are read in this slice. Every automated reply is labelled `simulated: true` and says that no AI model generated it, and readiness reports `"generation": "simulation"`. A pinned configuration in any other mode fails the turn visibly instead of pretending to generate.
+Every Business starts with an immutable, system-published configuration version 1 whose generation mode is `simulation`; it is created with the Business (and backfilled for existing ones) and cannot be updated or deleted. Every simulated reply is labelled `simulated: true` and says that no AI model generated it. Simulation needs no keys and stays available. Connected mode uses real providers only (see Providers); without a key, permission or model it fails the turn visibly instead of pretending to generate.
 
 An Owner approves each website that may embed chat (**Manage → Website chat origins**, or `GET/POST /api/businesses/:id/website-origins` with exactly `{ "origin": "https://shop.example.com", "approved": true | false }`). Origins must be exact `scheme://host[:port]` values; hosted mode accepts HTTPS only. Withdrawing an origin cuts off existing sessions on their next request. Embed the widget on an approved page:
 
@@ -96,7 +96,7 @@ Unapproved/missing origins and unknown Businesses return the same `403` without 
 
 A Business website that signs in its own customers can verify them in chat. Its server signs a short-lived ES256 JWT with a key whose public half an Owner registered (`/api/businesses/:id/customer-keys`; API only). The widget tag carries it as `data-assertion`. `POST /api/chat/:businessId/identity` `{ "assertion": "…" }` links only the current anonymous conversation; `POST /api/chat/:businessId/logout` `{}` ends the session. Both rotate the session token. Logout, account switching and assertion expiry end access to earlier history at once, and replies that arrive afterwards are not delivered. Email and phone never identify or merge Customers. The full integration contract (claims, algorithm, keys, lifetimes) is in [docs/customer-identity.md](docs/customer-identity.md).
 
-Deferred to later slices: real providers (#28), 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
+Deferred to later slices: 90-day retention (#24). Anonymous session creation is not yet rate limited; put hosted deployments behind ingress rate limiting.
 
 ## Workflow execution
 
@@ -127,8 +127,42 @@ Before every external attempt, and again before accepting the result, the worker
 No transaction stays open during a call. A takeover, handoff or sign-out therefore stops all later steps and discards late results. A worker crash fails the turn visibly once the lease lapses, and nothing is replayed. Each attempt is recorded value-free (step, kind, target, status, error, timing) for the Owner traces in #27.
 
 Current limits of this slice:
-- **Connected agents have no real provider before #28.** A connected agent is unavailable unless the test overlay's fixture provider is selected with model name `fixture`.
 - Consent and memory revalidation join the same check with #23–#24. Source deletion already does (see Knowledge).
+
+## Providers (connected generation)
+
+Connected agents generate with DeepSeek at `https://api.deepseek.com`, and may name one Qwen fallback at exactly `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. Both use `POST …/chat/completions` in JSON mode. Qwen is sent `enable_thinking: false`, because its JSON mode does not support thinking.
+
+**Keys.** Set `DEEPSEEK_API_KEY` and `DASHSCOPE_API_KEY` (a Singapore/International Model Studio key) in `.env`. Only the worker receives them, and each is sent only to its own endpoint. No key value appears in the app container, API responses, configuration, prompts, attempt rows or logs. Without a key, a connected agent is unavailable: the turn fails visibly to support and nothing is sent. Simulation is unaffected.
+
+**Egress.** The default launch keeps the worker on the internal network with no outbound access, so real calls need the connected overlay:
+
+```sh
+docker compose -f compose.yaml -f compose.connected.yaml up -d --wait
+```
+
+Never combine it with `compose.test.yaml`; the tests prove the worker runs without egress.
+
+**Permissions.** Nothing is sent to a provider unless an Owner currently allows it for that Business and operation (**Team and website → Cloud providers**, or the API). Support Members and other Businesses get `404`.
+- `GET /api/businesses/:id/provider-permissions`: every `{provider, operation, allowed, revision, updated_at}` pair (off until allowed), and `providers`, the worker's endpoint/key readiness.
+- `POST /api/businesses/:id/provider-permissions/:provider/:operation` `{ "allowed": true | false }`, with provider `deepseek` or `qwen` and operation `generation` or `extraction`. Extraction permissions are recorded now; Customer memory (#23) will use them.
+
+Like action controls, permissions are live and override pinned configuration versions. The worker checks the provider's permission before each attempt, and checks that it is unchanged before accepting the output and before delivering the reply. Every change bumps the revision, so revoking (even if allowed again at once) discards output already in flight. An agent's output also cannot travel to a later provider call once its own provider's permission changed.
+
+**Fallback.** A transient failure (timeout, connection error, 429 or 5xx) gets exactly one more attempt. With a `fallback`, that attempt goes to Qwen, if Qwen generation is allowed and its key is set; otherwise the turn hands off and nothing is sent to Qwen. Without a `fallback`, the same model is retried once. There is never a third attempt or provider. Both attempts count toward the 3 agent calls and the 60-second deadline. These are not retried and hand off at once: authentication or authorization failures (401/403), other 4xx errors, non-JSON or truncated output (`finish_reason` other than `stop`), and output outside the agent contract. Replies are delivered only when the whole turn finishes, so a fallback never follows partly delivered text.
+
+**Processing scope.** Qwen's endpoint is Singapore for access and static storage. Inference may run anywhere in the world except Chinese mainland, so this is not Singapore-only processing. Readiness and the Cloud providers view say so.
+
+**Readiness and measurements.** `GET /health/ready` reports `generation`: simulation, and for each provider its endpoint, role and whether its key is configured. A configured key is reported as "account and model access not verified until a measured run", never as available. Each provider attempt records, value-free:
+- provider/model and operation;
+- whether it was the fallback;
+- status and error;
+- timing;
+- the model the provider reports serving;
+- prompt and completion tokens;
+- an estimated cost.
+
+The worker logs one redacted line per attempt with the same data. Cost uses optional `PROVIDER_RATES`, JSON such as `{"deepseek/deepseek-flash":[0.5,2]}` (USD per million input and output tokens, keyed by the served model). Without a rate, no cost is estimated. The Owner trace view arrives with #27.
 
 ## Knowledge (documents)
 
@@ -215,6 +249,6 @@ npm test
 docker compose up -d --wait
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests, and a document starting `[hold Ns]` holds its activation the same way. The test overlay also starts a controlled HTTPS `fixture` service (provider and business endpoint, `tests/fixture/`, test-only self-signed CA) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md) and [knowledge validation](docs/validation-21.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests, and a document starting `[hold Ns]` holds its activation the same way. The test overlay also starts a controlled HTTPS `fixture` service (answering as `api.deepseek.com` and `dashscope-intl.aliyuncs.com` on the test network only, plus a business endpoint; `tests/fixture/`, test-only self-signed CA and synthetic worker keys) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md) and [knowledge validation](docs/validation-21.md) and [provider validation](docs/validation-28.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.
