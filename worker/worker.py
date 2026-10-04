@@ -637,9 +637,14 @@ class Turn:
             return 'failure'
 
     def refuse(self, step, target, error):
-        """A decision attempt refused before any transfer, recorded as failed; the failure route follows."""
-        self.connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation) "
-                                "VALUES(%s,%s,%s,'provider',%s,'failed',%s,clock_timestamp(),'decision')", (self.job[1], self.job[0], step, target, error))
+        """A decision attempt refused before any transfer, recorded as failed while the turn still holds; the failure route follows."""
+        with self.connection.transaction():
+            held = current(self.connection, self.job)
+            if held:
+                self.connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation) "
+                                        "VALUES(%s,%s,%s,'provider',%s,'failed',%s,clock_timestamp(),'decision')", (self.job[1], self.job[0], step, target, error))
+        if not held:
+            raise Lost()
         print(f'Provider attempt job={self.job[0]} step={step} {target} decision failed in 0.00s error={error}', flush=True)
         return 'failure'
 
@@ -670,12 +675,12 @@ class Turn:
             if not held:
                 raise Lost()
             if not accepted:
-                # A revoked or changed permission defeats a delayed decision.
-                raise Rejected('provider permission changed')
+                # A revoked or changed permission defeats a delayed decision and stops the turn, whatever the failure route leads to.
+                raise Stop(FAILED, 'provider permission changed')
             # Like generated text, whatever this decision routed to is delivered only while its permission stands.
             self.permits[('jev', 'decision')] = revision
             return route
-        except (Transient, Rejected) as failure:
+        except (Transient, Rejected, Stop) as failure:
             error = str(failure)
             raise
         finally:
@@ -774,9 +779,9 @@ def decision_route(data, choices, threshold):
     return choice if probabilities[choice] >= threshold else 'uncertain'
 
 
-def reason(response):
-    """A refusal's machine-readable error type as TypeSafe sends it ({"detail":{"error_type":"max_tokens_exceeded"}}), else
-    nothing; never its message."""
+def refusal_type(response):
+    """A TypeSafe refusal's machine-readable error type ({"detail":{"error_type":"max_tokens_exceeded"}}), else nothing; never
+    its message."""
     try:
         kind = json.loads(response.read(4096))['detail']['error_type']
     except (ValueError, KeyError, TypeError, OSError, RecursionError):
@@ -909,7 +914,7 @@ def request(method, url, body, deadline, headers=None, page=False):
         if page and not 200 <= response.status < 300:
             return response.status, response.getheader('location'), None, b''
         if not 200 <= response.status < 300:
-            raise Rejected(f'status {response.status}{reason(response)}')
+            raise Rejected(f"status {response.status}{refusal_type(response) if url.startswith(PROVIDERS['jev'][0]) else ''}")
         data = bytearray()
         while chunk := response.read1(65536):
             data += chunk

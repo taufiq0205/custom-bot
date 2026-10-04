@@ -189,6 +189,7 @@ test('Decisions: malformed, undeclared, unsupported-language, overflow and faile
   const valid=answer('refund',{refund:0.9,order_status:0.1}).json;
   const cases=[
     ['not JSON',[{raw:'not json'}],['malformed decision output']],
+    ['truncated JSON',[{raw:JSON.stringify(valid).slice(0,60)}],['malformed decision output']],
     ['non-finite number',[{raw:JSON.stringify(valid).replace('0.9,','NaN,')}],['malformed decision output']],
     ['missing language answer',[{json:{...valid,answers:{route:valid.answers.route}}}],['malformed decision output']],
     ['score instead of choice',[{json:{...valid,answers:{...valid.answers,route:{type:'score',score:1,legend:{},probabilities:{},confidence:1}}}}],['malformed decision output']],
@@ -238,9 +239,11 @@ test('Decisions: Business permission gates transfers and acceptance, revocation 
   await inFlight(`${key}@jev`);
   await permit(b,'jev',false,'decision');
   const message=await pending;
+  // The turn stops visibly, whatever the failure route leads to.
   const revoked=await customer.settle(message);
-  assert.deepEqual(revoked.messages.filter(m=>m.reply_to===message.id),[]);
+  assert.match(revoked.messages.find(m=>m.reply_to===message.id).text,/could not be answered automatically/);
   assert.equal(revoked.control_state,'waiting-for-support');
+  assert.equal(revoked.messages.some(m=>m.author==='assistant'),false);
   assert.deepEqual(decisions(message.id).map(a=>[a.status,a.error]),[['failed','provider permission changed']]);
   assert.equal((await calls(`${key}.refund`)).length,0);
   // A revocation after an accepted decision stops the turn before anything it routed to is delivered.
@@ -254,6 +257,25 @@ test('Decisions: Business permission gates transfers and acceptance, revocation 
   const stopped=await later.settle(await sent);
   assert.equal(stopped.messages.some(m=>m.author==='assistant'),false);
   assert.match(stopped.messages.find(m=>m.reply_to===stopped.messages.find(x=>x.author==='customer').id).text,/could not be answered automatically/);
+
+  // An Owner takeover while Jev answers: the late decision is discarded and nothing it would route to runs.
+  await permit(b,'jev',true,'decision');
+  await script(`${key}@jev`,[{...answer('refund',{refund:0.9,order_status:0.1}),delay:4}]);
+  await script(`${key}.refund`,[reply({outcome:'reply',reply:'Late reply.'})]);
+  const taken=await start(b);
+  const refundCalls=(await calls(`${key}.refund`)).length,jevCalls=(await calls(`${key}@jev`)).length;
+  const asked=await taken.send('Refund please.');
+  for(let i=0;i<40&&(await calls(`${key}@jev`)).length===jevCalls;i++)await wait(250);
+  const inbox=`/api/businesses/${b.id}/inbox/conversations/${taken.conversation.id}`;
+  assert.equal((await b.owner.request(inbox+'/claim',{revision:(await b.owner.request(inbox)).data.revision})).status,200);
+  await wait(5000);
+  const human=await taken.read();
+  assert.equal(human.control_state,'human-controlled');
+  assert.equal(human.messages.find(m=>m.id===asked.id).turn_state,'human');
+  assert.equal(human.messages.some(m=>m.author==='assistant'),false);
+  assert.equal((await calls(`${key}.refund`)).length,refundCalls);
+  assert.deepEqual(decisions(asked.id).map(a=>[a.status,a.error]),[['failed','aborted']]);
+  await permit(b,'jev',false,'decision');
 
   // Permissions are per Business: this one's revocation leaves another Business's permission in force.
   await publish(other,routed(`${key}-other`));

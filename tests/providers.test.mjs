@@ -295,6 +295,7 @@ test('Providers: Owner-only controls, readiness disclosure, fallback validation 
   for(const who of [support,outsider]) {
     assert.equal((await who.request(path)).status,404);
     assert.equal((await who.request(path+'/qwen/generation',{allowed:true})).status,404);
+    assert.equal((await who.request(path+'/jev/decision',{allowed:true})).status,404);
   }
   assert.equal((await owner.request(path+'/qwen/generation',{allowed:true},{headers:{origin:'https://evil.example'}})).status,403);
   assert.equal((await owner.request(path+'/qwen/generation',{allowed:'yes'})).status,400);
