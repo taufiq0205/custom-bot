@@ -22,7 +22,7 @@ async function conversation(client:PoolClient,business:string,session:Session,id
     WHERE ${owned} AND c.id=$4`,[...scope(business,session),id]);
   if(!found.rowCount)throw new Failure(404,'Conversation not found');
   // Operator identities and submission IDs stay internal.
-  const messages=await client.query(`SELECT id,author,text,simulated,CASE WHEN author='customer' THEN client_submission_id END AS client_submission_id,reply_to,turn_state,created_at FROM messages
+  const messages=await client.query(`SELECT id,author,text,simulated,CASE WHEN author='customer' THEN client_submission_id END AS client_submission_id,reply_to,turn_state,citations,created_at FROM messages
     WHERE business_id=$1 AND conversation_id=$2 ORDER BY seq`,[business,id]);
   return {...found.rows[0],messages:messages.rows};
 }

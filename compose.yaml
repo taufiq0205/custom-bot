@@ -49,6 +49,12 @@ services:
       interval: 5s
       timeout: 10s
       retries: 20
+  # Downloads the pinned embedding model once (about 135 MB) into the model volume, then only verifies it.
+  models:
+    build: worker
+    command: [python, knowledge.py]
+    volumes: [models:/models]
+    networks: [web]
   worker:
     build: worker
     environment:
@@ -57,6 +63,9 @@ services:
       ACTION_CREDENTIAL_KEY: ${ACTION_CREDENTIAL_KEY:-}
     depends_on:
       migrate: {condition: service_completed_successfully}
+      models: {condition: service_completed_successfully}
+    # The internal network has no outbound access: embedding runs only from the verified cache.
+    volumes: [models:/models:ro]
     networks: [internal]
     healthcheck:
       test: [CMD, python, -c, "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL']); assert c.execute(\"SELECT 1 FROM worker_health WHERE id='worker' AND heartbeat>now()-interval '10 seconds'\").fetchone()"]
@@ -78,3 +87,4 @@ networks:
   web: {}
 volumes:
   database: {}
+  models: {}

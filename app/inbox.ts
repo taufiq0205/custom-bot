@@ -11,7 +11,7 @@ async function detail(client:PoolClient,business:string,id:string) {
   const found=await client.query(`SELECT c.id,c.control_state,c.assignee_id,u.email AS assignee_email,c.handoff_reason,c.revision,c.configuration_version,
     c.customer_id IS NOT NULL AS verified,c.last_message_at FROM conversations c LEFT JOIN "user" u ON u.id=c.assignee_id WHERE c.business_id=$1 AND c.id=$2`,[business,id]);
   if(!found.rowCount)throw new Failure(404,'Conversation not found');
-  const messages=await client.query(`SELECT m.id,m.author,u.email AS operator_email,m.text,m.simulated,m.reply_to,m.turn_state,m.created_at FROM messages m
+  const messages=await client.query(`SELECT m.id,m.author,u.email AS operator_email,m.text,m.simulated,m.reply_to,m.turn_state,m.citations,m.created_at FROM messages m
     LEFT JOIN "user" u ON u.id=m.operator_id WHERE m.business_id=$1 AND m.conversation_id=$2 ORDER BY m.seq`,[business,id]);
   // Completed authorized lookups: declared result fields only, each a historical observation at observed_at.
   const lookups=await client.query('SELECT action_id,result,observed_at FROM lookup_results WHERE business_id=$1 AND conversation_id=$2 ORDER BY id',[business,id]);

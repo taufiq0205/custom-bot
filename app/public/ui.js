@@ -2,18 +2,19 @@ const status = document.querySelector('#status');
 let selectedBusiness=null;
 // Views change only on sign-in/out, Manage, Open inbox, rail navigation or lost access; never after saves, publishes or polling.
 const app=document.querySelector('#app');
-const titles={account:'Operator access',home:'Businesses',configuration:'Configuration',team:'Team and website',inbox:'Inbox'};
+const titles={account:'Operator access',home:'Businesses',configuration:'Configuration',knowledge:'Knowledge',team:'Team and website',inbox:'Inbox'};
+const managed=['configuration','knowledge','team'];
 function show(view) {
   app.dataset.view=view;
   for(const item of document.querySelectorAll('[data-nav]'))item.setAttribute('aria-current',String(item.dataset.nav===view));
   document.querySelector('#crumb-title').textContent=titles[view];
-  const business=view==='inbox'?inboxBusiness:['configuration','team'].includes(view)?selectedBusiness:null;
+  const business=view==='inbox'?inboxBusiness:managed.includes(view)?selectedBusiness:null;
   document.querySelector('#crumb-business').textContent=business?.name??'Custom Bot';
   // The canvas measures its nodes only while visible.
   if(view==='configuration')window.workflowEditor.shown();
 }
 function updateRail() {
-  for(const item of document.querySelectorAll('[data-nav=configuration],[data-nav=team]'))item.disabled=!selectedBusiness;
+  for(const item of document.querySelectorAll('[data-nav=configuration],[data-nav=knowledge],[data-nav=team]'))item.disabled=!selectedBusiness;
   document.querySelector('[data-nav=inbox]').disabled=!inboxBusiness;
 }
 for(const item of document.querySelectorAll('[data-nav]'))item.addEventListener('click',()=>show(item.dataset.nav));
@@ -37,9 +38,9 @@ async function refresh() {
     list.replaceChildren(...businesses.map(b=>{const li=document.createElement('li');li.append(Object.assign(document.createElement('span'),{textContent:`${b.name} — ${b.role}`}));
       const inboxButton=document.createElement('button');inboxButton.textContent=`Open inbox ${b.name}`;
       inboxButton.addEventListener('click',()=>run(async()=>{if(inboxBusiness?.id!==b.id){closeInbox();inboxBusiness=b;}await loadInbox();show('inbox');}));li.append(inboxButton);
-      if(b.role==='Owner'){const button=document.createElement('button');button.className='btn-primary';button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{if(!discardEdits())return;clearConfiguration();selectedBusiness=b;show('configuration');await refreshMemberships();await loadConfiguration();}));li.append(button);}
+      if(b.role==='Owner'){const button=document.createElement('button');button.className='btn-primary';button.textContent=`Manage ${b.name}`;button.addEventListener('click',()=>run(async()=>{if(!discardEdits())return;clearConfiguration();selectedBusiness=b;show('configuration');await refreshMemberships();await loadConfiguration();await loadKnowledge();}));li.append(button);}
       return li;}));
-      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) {selectedBusiness=null;clearConfiguration();if(['configuration','team'].includes(app.dataset.view))show('home');}
+      if(selectedBusiness && !businesses.some(b=>b.id===selectedBusiness.id&&b.role==='Owner')) {selectedBusiness=null;clearConfiguration();if(managed.includes(app.dataset.view))show('home');}
       if(inboxBusiness && !businesses.some(b=>b.id===inboxBusiness.id)){closeInbox();if(app.dataset.view==='inbox')show('home');}
     if(app.dataset.signedIn!=='true'){app.dataset.signedIn='true';show('home');}
     updateRail();
@@ -121,7 +122,7 @@ let config=null;
 const editor=document.querySelector('#config-text');
 const configPath=()=>`/api/businesses/${selectedBusiness.id}/configuration`;
 // Switching Business or account drops the previous draft, so its text can never be saved elsewhere.
-function clearConfiguration(){config=null;window.workflowEditor.clear();document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
+function clearConfiguration(){config=null;clearTimeout(knowledgePoll);document.querySelector('#knowledge-sources').replaceChildren();window.workflowEditor.clear();document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
 const discardEdits=()=>!config||editor.value===config.text||confirm('Discard your unsaved configuration edits?');
 function showConfiguration(validation) {
   document.querySelector('#config-state').textContent=`Draft revision ${config.revision} · published version ${config.published}`;
@@ -167,6 +168,40 @@ document.querySelector('#config-publish').addEventListener('click',()=>run(async
   showConfiguration({errors:[],blockers:[]});
   status_(`Published version ${data.version}. New conversations use it; existing conversations keep their version.`);
 }));
+
+// Knowledge sources. An upload only queues ingestion; the list shows what is actually active and polls while an upload is pending.
+let knowledgePoll;
+async function loadKnowledge() {
+  clearTimeout(knowledgePoll);
+  const business=selectedBusiness;
+  const sources=await request(`/api/businesses/${business.id}/sources`);
+  if(business!==selectedBusiness)return;
+  document.querySelector('#knowledge-title').textContent=`${business.name} knowledge sources`;
+  const pending=s=>['queued','running'].includes(s.latest.state);
+  document.querySelector('#knowledge-sources').replaceChildren(...(sources.length?sources.map(s=>{
+    const li=document.createElement('li'),text=document.createElement('div');
+    text.append(Object.assign(document.createElement('strong'),{textContent:s.ref}),` — ${s.active?`Active: ${s.active.document} (${s.active.passages} passages, since ${new Date(s.active.activated_at).toLocaleString()})`:'No usable version'}${pending(s)?` · Ingesting ${s.latest.document}…`:''}`);
+    if(s.warning)text.append(Object.assign(document.createElement('p'),{className:'warning',textContent:s.warning}));
+    const remove=Object.assign(document.createElement('button'),{className:'btn-danger',textContent:'Delete'});
+    remove.setAttribute('aria-label',`Delete source: ${s.ref}`);
+    remove.addEventListener('click',()=>run(async()=>{
+      if(!confirm(`Delete ${s.ref}? Answers stop using every version of it at once, including in existing conversations.`))return;
+      await request(`/api/businesses/${business.id}/sources/${encodeURIComponent(s.ref)}/delete`,{});await loadKnowledge();status_(`Source ${s.ref} deleted.`);
+    }));
+    li.append(text,remove);return li;
+  }):[Object.assign(document.createElement('li'),{textContent:'No knowledge sources yet.'})]));
+  if(sources.some(pending))knowledgePoll=setTimeout(()=>loadKnowledge().catch(()=>{}),2000);
+}
+document.querySelector('#knowledge-upload').addEventListener('submit',event=>{
+  event.preventDefault();
+  const form=event.currentTarget,ref=form.elements.ref.value.trim(),file=form.elements.file.files[0];
+  run(async()=>{
+    const response=await fetch(`/api/businesses/${selectedBusiness.id}/sources/${encodeURIComponent(ref)}?document=${encodeURIComponent(file.name)}`,{method:'POST',body:file});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Upload failed');
+    form.reset();status_(`${file.name} queued for ingestion. Answers use it only once it is complete.`);await loadKnowledge();
+  });
+});
 
 window.workflowEditor.setServices({run,save:saveConfiguration,loadPublished:()=>request(`${configPath()}/versions/${config.published}`)});
 
@@ -214,7 +249,8 @@ async function loadConversation(polled=false) {
   const mine=c.assignee_id===inbox.operator_id;
   document.querySelector('#inbox-meta').textContent=`${states[c.control_state]}${c.assignee_email?`, assigned to ${mine?'you':c.assignee_email}`:''}${c.handoff_reason?`. Reason: ${c.handoff_reason}`:''}. ${c.verified?'Verified Customer':'Anonymous Customer'}.`;
   const who=m=>m.author==='customer'?'Customer':m.author==='operator'?`Support (${m.operator_email})`:m.author==='system'?'Notice':m.simulated?'Simulated assistant':'Assistant';
-  document.querySelector('#inbox-messages').replaceChildren(...c.messages.map(m=>Object.assign(document.createElement('li'),{textContent:`${who(m)}: ${m.text}`})));
+  const sources=m=>m.citations?` (Sources: ${m.citations.map(x=>x.page?`${x.document}, page ${x.page}`:x.document).join('; ')})`:'';
+  document.querySelector('#inbox-messages').replaceChildren(...c.messages.map(m=>Object.assign(document.createElement('li'),{textContent:`${who(m)}: ${m.text}${sources(m)}`})));
   // External data: text only.
   const value=v=>v!==null&&typeof v==='object'?JSON.stringify(v):String(v);
   document.querySelector('#inbox-lookups').replaceChildren(...(c.lookups.length?c.lookups.map(l=>Object.assign(document.createElement('li'),
