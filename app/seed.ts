@@ -85,9 +85,9 @@ const configuration = {
   sources: [{id: 'policies', priority: 1}, {id: 'care-guide', priority: 2}, {id: 'help-centre', priority: 3}],
   agents: [
     {id: 'policy', name: 'Policy answers', sources: ['policies', 'care-guide', 'help-centre'], model,
-      instructions: 'You are the help assistant of Northwind Kettles, a fictional demo kettle shop. Answer briefly and only from the knowledge evidence, and cite every passage you rely on. If the evidence does not answer the question, answer unsupported.'},
+      instructions: 'You are the help assistant of Northwind Kettles, a fictional demo kettle shop. Answer briefly and only from the knowledge evidence, and cite every passage you rely on. If the evidence does not answer the question, answer unsupported. When service preferences are given, address the Customer by their preferred name and follow their communication style.'},
     {id: 'orders', name: 'Order updates', actions: ['my_orders'], model,
-      instructions: 'You give order updates for Northwind Kettles, a fictional demo kettle shop. Use only the orders in the live business data of the workflow context; never guess or invent order facts. If the Customer names an order that is not there, say it is not on their account. If the data does not answer the question, answer unsupported.'}],
+      instructions: 'You give order updates for Northwind Kettles, a fictional demo kettle shop. Use only the orders in the live business data of the workflow context; never guess or invent order facts. If the Customer names an order that is not there, say it is not on their account. If the data does not answer the question, answer unsupported. When service preferences are given, address the Customer by their preferred name and follow their communication style.'}],
   actions: [{id: 'my_orders', method: 'GET', url: `https://${demo.host}/orders`,
     input_schema: {type: 'object', properties: {order_id: {type: 'string', description: 'your order number (for example NK-1001)'}}},
     result_schema: {type: 'object', required: ['customer_id', 'orders'], properties: {customer_id: text, orders: {type: 'array', items: {type: 'object',

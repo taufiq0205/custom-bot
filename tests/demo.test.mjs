@@ -97,17 +97,17 @@ test('Demo seed: one documented command through the APIs; reruns, also concurren
   assert.deepEqual(sql(`SELECT DISTINCT coalesce(published_by,'system') FROM published_configurations WHERE business_id='${B}'`).split('\n').sort(),[ownerId,'system'].sort());
   assert.equal(sql(`SELECT count(*) FROM demo_seeds WHERE name='Northwind Kettles'`),'1');
 
+  // Two concurrent reruns after a seed stopped before recording its marker: without the seed lock both would adopt the Business and
+  // one would fail on the marker's key. Both succeed, and the Business is adopted once.
+  sql(`DELETE FROM demo_seeds WHERE name='Northwind Kettles'`);
   const outputs=await Promise.all([seedAsync(),seedAsync()]);
+  assert.equal(sql(`SELECT string_agg(business_id::text,',') FROM demo_seeds WHERE name='Northwind Kettles'`),B);
   for(const {stdout} of outputs) {
     assert.deepEqual(created(stdout),[]);
     assert.match(stdout,/Already exists: Business Northwind Kettles/);
     assert.match(stdout,/Already exists: published configuration version \d+ \(simulation\)/);
   }
   assert.deepEqual(await snapshot(),before);
-  // A seed stopped between creating the Business and recording its marker: the rerun adopts that Business instead of duplicating it.
-  sql(`DELETE FROM demo_seeds WHERE name='Northwind Kettles'`);
-  assert.deepEqual(created(seed()),[]);
-  assert.equal(sql(`SELECT business_id FROM demo_seeds WHERE name='Northwind Kettles'`),B);
   const again=seed();
   assert.deepEqual(created(again),[]);
   assert.equal(again.split('\n').filter(l=>l.startsWith('Already exists')).length,11);

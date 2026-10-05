@@ -54,6 +54,7 @@ The worker reaches the demo service only when `DEMO_PUBLIC_HOSTS=northwind.demo.
   - `ACTION_CREDENTIAL_KEY` (`openssl rand -hex 32`), so the orders credential can be stored.
   - `SEED_OWNER_EMAIL` and `SEED_OWNER_PASSWORD` for the Owner, and `SEED_SUPPORT_PASSWORD` for the demo Support Operator.
 - The embedding model, installed once: `docker compose run --rm models` (needs network).
+- Optional: `PROVIDER_RATES`, so traces show cost estimates (see Providers).
 - Connected mode only: `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY` (and optionally `DASHSCOPE_API_KEY` for the Qwen fallback), plus `compose.connected.yaml` for outbound HTTPS (see Providers).
 
 ### The command
@@ -93,7 +94,13 @@ A rerun creates only what is missing and prints `Already exists:` for the rest. 
 1. **Chat with a cited answer.** Open the shop link and ask *"What is your returns policy?"*.
    - Connected: the answer cites `northwind-policies.pdf, page 1`.
    - Simulation: the reply is labelled simulated and contains no business facts. The trace still shows the passages retrieval found.
-2. **Memory** (connected). Click **Sign in as demo customer**, opt in under **Customer memory**, and say *"Please call me Ada and keep answers brief."* The next reply uses the preference, and the panel lists it. Product interests accept only a fixed list, and kettles are not on it. In simulation, opt-in and corrections work, but nothing is extracted.
+2. **Memory** (connected).
+   - Click **Sign in as demo customer**, then opt in under **Customer memory**.
+   - Save the preferences: `preferred_name` `Ada` and `communication_style` `brief` (**Save preference correction**).
+   - The next answer addresses Ada by name and stays brief.
+
+   The model can also extract a preference from chat, but only from a message that is the statement alone (*"Please call me Ada."*), and Jev routes such a message to support. Product interests accept only a fixed list, and kettles are not on it. In simulation, opt-in and preferences work, but replies are not generated.
+
 3. **Order lookup.** Signed in, ask *"Where is my order?"*. The worker calls the demo order API as `demo-customer-ada` and checks that the result is hers. It gets NK-1001 and NK-1002, never another Customer's NK-2001. Signed out, the assistant asks you to sign in.
 4. **Jev route.** Each message is first routed by Jev. Simulation sends no Jev request; it picks the choice whose description shares the most words with the message, and the trace labels that a keyword match.
 5. **Handoff.** Say *"hello"* (or anything outside policies and orders). The conversation waits for support. Sign in at http://localhost:3100 as `support@northwind-kettles.test`, open the Northwind Kettles inbox, claim it and reply.
