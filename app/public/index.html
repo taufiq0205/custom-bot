@@ -28,6 +28,7 @@
 </div>
 <span class="spacer"></span>
 <span id="config-state" class="version config-only"></span>
+<button id="preview-toggle" class="config-only" type="button" aria-expanded="false" aria-controls="preview-panel">▷ Preview chat</button>
 <button id="config-reload" class="config-only" type="button">Reload draft</button>
 <button id="config-save" class="config-only" type="button">Save draft</button>
 <button id="config-publish" class="btn-primary config-only" type="button">Publish</button>
@@ -164,6 +165,16 @@
 </section>
 <ul id="config-issues" class="issues"></ul>
 </div>
+<aside id="preview-panel" class="test-panel" aria-label="Preview chat" hidden>
+<div class="tp-head"><h2>Preview chat</h2><span id="preview-mode" class="tag"></span><span class="spacer"></span><button id="preview-new" type="button">↻ New chat</button><button id="preview-close" class="btn-ghost" type="button" aria-label="Close preview chat">✕</button></div>
+<p id="preview-note" class="pin-note" hidden></p>
+<div id="preview-log" class="chat-log" role="log" aria-live="polite"><p class="empty">Start a New chat on the latest published version, or open a recent conversation's trace.</p></div>
+<form id="preview-form" class="composer" hidden>
+<p class="help">You chat as an anonymous preview Customer. Replies run the published version shown above, never your draft, and never reach the inbox.</p>
+<div class="inline-form"><label>Preview message <input name="text" maxlength="2000" required autocomplete="off"></label><button class="btn-primary">Send</button></div>
+</form>
+<details class="recent"><summary>Recent conversations</summary><ul id="trace-list" class="rows"></ul></details>
+</aside>
 </section>
 
 <section id="inbox-panel" class="view page" data-view-name="inbox" hidden>

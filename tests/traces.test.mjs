@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
 import { action, active, agent, base, business, calls, cite, config, handoff, invitationToken, operator, owned, permit, publish, reply, script,
   sql, start, upload, wait } from './helpers.mjs';
 // Sign-ups first: Better Auth allows 3 per 10 s.
@@ -42,6 +43,99 @@ async function preview(b) {
       throw new Error('Preview turn did not settle');
     }};
 }
+
+test('browser: an Owner previews a version, follows its trace to the draft without changing it, and tells versions apart; Support sees none of it',async()=>{
+  const b=await business('traces-browser',{owner});
+  const key=`browser-${crypto.randomUUID()}`;
+  // Version 2 (simulation): a condition, then a final agent. The draft then drops the condition, so it is "not in draft".
+  const v2={...config({agents:[agent(`${key}.reply`)],steps:[{id:'route',type:'condition',field:'intent',equals:'human'},
+    {id:'reply',type:'agent',agent:'reply',final:true},handoff],links:[['route','yes','support'],['route','fallback','reply'],['reply','unsupported','support']]}),
+    generation:{mode:'simulation'}};
+  await publish(b,v2);
+  const draftDoc=structuredClone(v2);
+  draftDoc.workflow.entry='reply';
+  draftDoc.workflow.steps=draftDoc.workflow.steps.filter(s=>s.id!=='route');
+  draftDoc.workflow.connections=draftDoc.workflow.connections.filter(c=>c.from!=='route');
+  const path=`/api/businesses/${b.id}/configuration`,pretty=JSON.stringify(draftDoc,null,2);
+  const saved=await owner.request(path,{text:pretty,revision:(await owner.request(path)).data.revision});
+  assert.equal(saved.status,200);
+  const unchanged=async text=>{const now=(await owner.request(path)).data;assert.deepEqual([now.revision,now.text],[saved.data.revision,text]);};
+  assert.equal((await owner.request(`/api/businesses/${b.id}/invitations`,{email:support.email,role:'Support'})).status,201);
+  assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
+  const browser=await chromium.launch();
+  try {
+    const page=await (await browser.newContext({viewport:{width:1440,height:980}})).newPage();
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    page.on('dialog',dialog=>{errors.push(`unexpected dialog: ${dialog.message()}`);dialog.dismiss();});
+    await page.goto(base);
+    await page.getByLabel('Email',{exact:true}).fill(owner.email);
+    await page.getByLabel('Password',{exact:true}).fill(owner.password);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await page.getByRole('button',{name:'Manage traces-browser Business',exact:true}).click();
+    await page.getByRole('region',{name:'Workflow canvas'}).waitFor();
+    await page.getByRole('button',{name:'▷ Preview chat'}).click();
+    const panel=page.getByRole('complementary',{name:'Preview chat'});
+    await panel.getByRole('button',{name:'↻ New chat'}).click();
+    await page.getByText('New preview chat pinned to published version 2 (simulation).',{exact:true}).waitFor();
+    await panel.getByText('Simulation · version 2',{exact:true}).waitFor();
+    await panel.getByLabel('Preview message').fill('Hello there');
+    await panel.getByRole('button',{name:'Send',exact:true}).click();
+    await panel.getByText('Execution trace · version 2 · simulation · 2 steps · completed',{exact:true}).waitFor();
+    // Each reply names its pinned version and mode.
+    await panel.locator('.msg.agent .msg-meta').filter({hasText:'Simulated assistant'}).getByText('Simulation · version 2').waitFor();
+    const missing=panel.getByRole('button',{name:'Trace step 1: route (condition), not in draft'});
+    const present=panel.getByRole('button',{name:'Trace step 2: reply (agent), locate'});
+    await panel.getByText(/simulated: no AI model was called/).waitFor();
+    await present.click();
+    await page.locator('[data-step-id="reply"].selected').waitFor();
+    await page.getByText(/^Located reply on the canvas\. This turn ran published version 2, not the draft, whose settings may differ\. Configuration unchanged\.$/).waitFor();
+    await missing.click();
+    await page.getByText('Step route ran in version 2 but is not in the current draft. Configuration unchanged.',{exact:true}).waitFor();
+    await unchanged(pretty);
+    // JSON view: the step's ID is selected in the text (in the steps, not the agent with the same ID).
+    await page.getByRole('button',{name:'JSON',exact:true}).click();
+    const editor=page.getByLabel('Configuration JSON');
+    await present.click();
+    await page.getByText(/^Located reply in the draft JSON\. This turn ran published version 2/).waitFor();
+    const selection=await editor.evaluate(e=>[e.value.slice(e.selectionStart,e.selectionEnd),e.selectionStart>e.value.indexOf('"steps"')]);
+    assert.deepEqual(selection,['"id": "reply"',true]);
+    assert.equal(await editor.inputValue(),pretty);
+    await unchanged(pretty);
+    // Invalid draft JSON: only a text search, said so, and the text stays exactly as saved.
+    const invalid=pretty.replace('"final": true','"final": true,,');
+    const broken=await owner.request(path,{text:invalid,revision:saved.data.revision});
+    assert.equal(broken.status,200);
+    saved.data.revision=broken.data.revision;
+    await page.getByRole('button',{name:'Reload draft',exact:true}).click();
+    await page.getByText('Latest draft loaded.',{exact:true}).waitFor();
+    await present.click();
+    await page.getByText(/^Located reply in the draft JSON by text search, because the draft JSON is invalid\. This turn ran published version 2/).waitFor();
+    assert.equal(await editor.inputValue(),invalid);
+    await unchanged(invalid);
+    // A newer publication: the old conversation still reports version 2, and says version 3 is current.
+    const earlier=(await owner.request(`/api/businesses/${b.id}/traces`)).data[0].id;
+    await publish(b,draftDoc);
+    await page.getByRole('button',{name:'Reload draft',exact:true}).click();
+    await page.getByText('Latest draft loaded.',{exact:true}).waitFor();
+    await panel.getByRole('button',{name:'↻ New chat'}).click();
+    await panel.getByText('Simulation · version 3',{exact:true}).waitFor();
+    await panel.getByText('Recent conversations').click();
+    await panel.getByRole('button',{name:`Open trace ${earlier.slice(0,8)}`}).click();
+    await panel.getByText(/pinned to published version 2 \(simulation\)\. Version 3 is published now; New chat uses it\./).waitFor();
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    assert.deepEqual(errors,[]);
+    // Support: the Business has no Manage, so no configuration, preview or trace view.
+    const other=await (await browser.newContext({viewport:{width:1440,height:980}})).newPage();
+    await other.goto(base);
+    await other.getByLabel('Email',{exact:true}).fill(support.email);
+    await other.getByLabel('Password',{exact:true}).fill(support.password);
+    await other.getByRole('button',{name:'Sign in',exact:true}).click();
+    await other.getByText('traces-browser Business — Support').waitFor();
+    assert.equal(await other.getByRole('button',{name:'Manage traces-browser Business'}).count(),0);
+    assert.equal(await other.getByRole('button',{name:'▷ Preview chat'}).isVisible(),false);
+  } finally {await browser.close();}
+});
 
 test('Preview: an Owner chats with the published version in simulation; each reply is labelled and traced; previews stay out of the inbox',async()=>{
   const b=await business('traces-preview',{owner});

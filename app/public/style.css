@@ -175,6 +175,33 @@ kbd{font:11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;b
 .json-error-box ul{margin:0;padding-left:18px;white-space:pre-wrap;font:12px/1.6 var(--mono)}
 .err-actions{display:flex;gap:6px;margin-top:8px}
 
+/* preview chat and execution traces (prototype: preview chat) */
+#configuration-panel{position:relative}
+.tag{font:600 10.5px var(--mono);background:var(--teal-soft);color:var(--teal-strong);border-radius:5px;padding:2px 6px;white-space:nowrap}
+.test-panel{width:384px;flex:none;background:#fff;border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;z-index:20}
+.tp-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line-2)}
+.tp-head h2{font-size:14px;margin:0;white-space:nowrap}
+.tp-head button{white-space:nowrap}
+.pin-note{font-size:12px;padding:8px 14px;margin:0;background:var(--amber-soft);color:var(--amber);border-bottom:1px solid #f1dcb4;line-height:1.5}
+.chat-log{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--sunken);min-height:120px}
+.msg{max-width:90%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.msg.customer{align-self:flex-end;background:var(--ink-2);color:#fff;border-bottom-right-radius:4px}
+.msg.agent{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px;width:90%}
+.msg.system{align-self:center;background:var(--amber-soft);color:var(--amber);font-size:12px;border-radius:12px;padding:5px 12px;text-align:center}
+.msg-meta{font:600 11px var(--mono);color:var(--muted);margin-bottom:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.trace{margin-top:9px;border-top:1px dashed var(--line);padding-top:7px}
+.chat-log>.trace{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.trace summary{cursor:pointer;font:12px var(--mono);color:var(--teal)}
+.trace-steps{display:flex;flex-direction:column;gap:3px;margin:7px 0}
+.trace-steps button{text-align:left;font:12px var(--mono);padding:4px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.trace-steps button.gone{color:var(--faint)}
+.trace pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);color:var(--muted);margin:0 0 4px;background:var(--sunken);padding:6px 8px;border-radius:6px}
+.composer{border-top:1px solid var(--line-2);padding:10px 14px 12px}
+.composer .help{margin:0 0 4px}
+.recent{border-top:1px solid var(--line-2);padding:8px 14px;max-height:30%;overflow:auto}
+.recent summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)}
+.empty{color:var(--faint);text-align:center;margin:auto;font-size:12px;max-width:240px}
+
 /* dialogs */
 dialog{border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:0;width:min(460px,calc(100vw - 32px));color:var(--text)}
 dialog::backdrop{background:rgb(14 20 25/.38)}
@@ -189,7 +216,7 @@ dialog::backdrop{background:rgb(14 20 25/.38)}
 
 .workflow-editor.reduce-motion *,.workflow-editor.reduce-motion *::before,.workflow-editor.reduce-motion *::after{animation:none!important;transition:none!important}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
-@media (max-width:1000px){.inbox-layout{grid-template-columns:1fr}}
+@media (max-width:1000px){.inbox-layout{grid-template-columns:1fr}.test-panel{position:absolute;top:0;right:0;bottom:0;box-shadow:var(--shadow)}}
 @media (max-width:720px){
  .app[data-signed-in=true]{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
  .rail{flex-direction:row;padding:6px 10px;gap:4px;overflow-x:auto}
@@ -203,4 +230,5 @@ dialog::backdrop{background:rgb(14 20 25/.38)}
  .json-view{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
  .outline{flex-direction:row;gap:2px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:6px}
  .outline button{width:auto}
+ .test-panel{width:100%;left:0}
 }
