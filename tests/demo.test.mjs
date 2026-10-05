@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -32,6 +32,10 @@ const outsider=await operator('demo-outsider');
 const first=seed();
 const B=first.match(/Shop: http:\/\/localhost:3300\/\?business=(\S+)/)[1];
 const at=path=>`/api/businesses/${B}/${path}`;
+
+// Better Auth rate-limits every client under one key (no trusted IP header), and each seed run signs in twice: let the sign-in
+// window pass so the next file starts with a full budget.
+after(()=>wait(61000));
 
 // Website chat from the demo shop's approved origin.
 const chat=async(path,body,token)=>{
@@ -138,6 +142,17 @@ test('Demo service: labelled in readiness; only local or test mode with exactly 
   } finally {execFileSync('docker',['rm','-f',bare],{stdio:'ignore'});compose('start','worker');}
   for(let i=0;i<80&&!(await health().catch(()=>({}))).demo;i++)await wait(250);
   assert.equal(execFileSync('docker',['ps','--format','{{.Names}}'],{encoding:'utf8'}).split('\n').filter(n=>/custom-bot-worker/.test(n)).length,1);
+  // With another CA (the fixture's, which every other test host uses), the demo certificate is rejected: only the demo CA verifies it.
+  compose('stop','worker');
+  const wrongCa=compose('run','-d','--no-deps','-e','DEMO_CA_FILE=/fixture/cert.pem','worker').trim();
+  try {
+    for(let i=0;i<80&&!(await health().catch(()=>({}))).demo;i++)await wait(250);
+    assert.equal((await outsider.request(`/api/businesses/${b.id}/sources/demo-help/refresh`,{})).status,202);
+    const source=await ingested(b,'demo-help');
+    assert.equal(source.latest.state,'failed');
+    assert.match(source.latest.error,/certificate/);
+  } finally {execFileSync('docker',['rm','-f',wrongCa],{stdio:'ignore'});compose('start','worker');}
+  for(let i=0;i<80&&!(await health().catch(()=>({}))).demo;i++)await wait(250);
   // The allowlisted worker crawls the same scope.
   assert.equal((await outsider.request(`/api/businesses/${b.id}/sources/demo-help/refresh`,{})).status,202);
   assert.equal((await ingested(b,'demo-help')).latest.state,'active');
