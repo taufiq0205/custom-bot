@@ -9,7 +9,7 @@ const changed=()=>new Failure(409,'This conversation changed (claimed, reassigne
 const notAssignee=()=>new Failure(409,'Only the current assignee can do this. Nothing was sent or changed.');
 async function detail(client:PoolClient,business:string,id:string) {
   const found=await client.query(`SELECT c.id,c.control_state,c.assignee_id,u.email AS assignee_email,c.handoff_reason,c.revision,c.configuration_version,
-    c.customer_id IS NOT NULL AS verified,c.last_message_at FROM conversations c LEFT JOIN "user" u ON u.id=c.assignee_id WHERE c.business_id=$1 AND c.id=$2`,[business,id]);
+    c.customer_id IS NOT NULL AS verified,c.last_message_at FROM conversations c LEFT JOIN "user" u ON u.id=c.assignee_id WHERE c.business_id=$1 AND c.id=$2 AND NOT c.preview`,[business,id]);
   if(!found.rowCount)throw new Failure(404,'Conversation not found');
   const messages=await client.query(`SELECT m.id,m.author,u.email AS operator_email,m.text,m.simulated,m.reply_to,m.turn_state,m.citations,m.created_at FROM messages m
     LEFT JOIN "user" u ON u.id=m.operator_id WHERE m.business_id=$1 AND m.conversation_id=$2 ORDER BY m.seq`,[business,id]);
@@ -17,7 +17,7 @@ async function detail(client:PoolClient,business:string,id:string) {
   const lookups=await client.query('SELECT action_id,result,observed_at FROM lookup_results WHERE business_id=$1 AND conversation_id=$2 ORDER BY id',[business,id]);
   return {...found.rows[0],messages:messages.rows,lookups:lookups.rows};
 }
-// Shared support queue: every active Owner/Support Member of the Business, never another Business's.
+// Shared support queue: every active Owner/Support Member of the Business, never another Business's. Owner previews never enter it.
 export async function inbox(req:IncomingMessage,path:string,user:{id:string},json:(status:number,value:unknown)=>void) {
   const match=path.match(route);
   if(!match)return false;
@@ -46,7 +46,7 @@ export async function inbox(req:IncomingMessage,path:string,user:{id:string},jso
       // ponytail: newest 200 conversations with messages, queue first; add paging when a Business outgrows it.
       const conversations=await client.query(`SELECT c.id,c.control_state,c.assignee_id,u.email AS assignee_email,c.handoff_reason,c.revision,
         c.customer_id IS NOT NULL AS verified,c.last_message_at FROM conversations c LEFT JOIN "user" u ON u.id=c.assignee_id
-        WHERE c.business_id=$1 AND c.last_message_at IS NOT NULL ORDER BY c.control_state='waiting-for-support' DESC,c.last_message_at DESC,c.id LIMIT 200`,[business]);
+        WHERE c.business_id=$1 AND c.last_message_at IS NOT NULL AND NOT c.preview ORDER BY c.control_state='waiting-for-support' DESC,c.last_message_at DESC,c.id LIMIT 200`,[business]);
       result={operator_id:user.id,members:members.rows,conversations:conversations.rows};
     } else if(!action) result=await detail(client,business,id);
     else {
@@ -55,7 +55,7 @@ export async function inbox(req:IncomingMessage,path:string,user:{id:string},jso
       if(typeof input.revision!=='string'||!/^\d{1,18}$/.test(input.revision))throw new Failure(400,'Provide revision');
       if(action==='reassign'&&typeof input.operator_id!=='string')throw new Failure(400,'Provide revision and operator_id');
       // Every check below holds the conversation lock until commit, so control and ownership cannot change in between.
-      const locked=await client.query('SELECT control_state,assignee_id,revision FROM conversations WHERE business_id=$1 AND id=$2 FOR UPDATE',[business,id]);
+      const locked=await client.query('SELECT control_state,assignee_id,revision FROM conversations WHERE business_id=$1 AND id=$2 AND NOT preview FOR UPDATE',[business,id]);
       if(!locked.rowCount)throw new Failure(404,'Conversation not found');
       const c=locked.rows[0] as Conversation;
       if(reply) {
