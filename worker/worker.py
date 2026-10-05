@@ -726,16 +726,18 @@ class Turn:
 
     def traced(self, step):
         """One step, recorded when it starts and when it ends (with its route, or why the turn stopped in it). A record left at
-        'started' means the worker stopped mid-step. Whether anything was delivered is the job's outcome, decided later."""
+        'started' means the worker stopped mid-step. Whether anything was delivered is the job's outcome, decided later.
+        Like the steps themselves, the records are written without the turn's authority check: a turn that lost its lease still
+        records what it ran, and the job's outcome shows that nothing of it was delivered."""
         record = self.connection.execute('INSERT INTO execution_steps(business_id,job_id,ordinal,step_id,type) VALUES(%s,%s,%s,%s,%s) RETURNING id',
                                          (self.job[1], self.job[0], self.steps, step['id'], step['type'])).fetchone()[0]
-        self.detail, status, output, error = {}, 'failed', None, None
+        self.detail, status, output, error = {}, 'failed', None, 'unexpected worker error'
         try:
             output, value = self.visit(step)
-            status = 'succeeded'
+            status, error = 'succeeded', None
             return output, value
         except Clarify:
-            status, output = 'succeeded', 'clarification'
+            status, output, error = 'succeeded', 'clarification', None
             raise
         except Stop as stop:
             error = stop.error
@@ -744,8 +746,13 @@ class Turn:
             error = 'turn lost its authority (control change, lease or session)'
             raise
         finally:
-            self.connection.execute("UPDATE execution_steps SET status=%s,output=%s,error=%s,detail=%s::jsonb,finished_at=clock_timestamp() WHERE id=%s",
-                                    (status, output, error, json.dumps(self.detail) if self.detail else None, record))
+            try:
+                self.connection.execute("UPDATE execution_steps SET status=%s,output=%s,error=%s,detail=%s::jsonb,finished_at=clock_timestamp() WHERE id=%s",
+                                        (status, output, error, json.dumps(self.detail) if self.detail else None, record))
+            except psycopg.Error:
+                # A lost connection must not mask the original failure; the record stays 'started' and reads as interrupted.
+                if status == 'succeeded':
+                    raise
 
     def visit(self, step):
         kind = step['type']

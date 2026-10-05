@@ -260,8 +260,10 @@ const previewToggle=document.querySelector('#preview-toggle'),previewForm=docume
 let shown=null,tracePoll;
 const previewPath=()=>`/api/businesses/${selectedBusiness.id}/preview`,tracesPath=()=>`/api/businesses/${selectedBusiness.id}/traces`;
 const node=(name,props={},...children)=>{const n=Object.assign(document.createElement(name),props);n.append(...children);return n;};
+// Closing also stops the trace poll, so a running turn never reopens the panel.
+function setPreviewOpen(open){previewPanel.hidden=!open;previewToggle.setAttribute('aria-expanded',String(open));if(!open)clearTimeout(tracePoll);}
 function closePreview(){
-  clearTimeout(tracePoll);shown=null;previewPanel.hidden=true;previewToggle.setAttribute('aria-expanded','false');previewForm.hidden=true;
+  setPreviewOpen(false);shown=null;previewForm.hidden=true;
   document.querySelector('#preview-note').hidden=true;document.querySelector('#preview-mode').textContent='';document.querySelector('#trace-list').replaceChildren();
   previewLog.replaceChildren(node('p',{className:'empty',textContent:'Start a New chat on the latest published version, or open a recent conversation\'s trace.'}));
 }
@@ -274,11 +276,12 @@ async function loadTraceList() {
     return node('li',{},node('span',{textContent:`${c.preview?'Preview':'Customer'} · version ${c.configuration_version} · ${c.mode} · ${new Date(c.last_message_at).toLocaleString()}`}),open);
   }):[node('li',{textContent:'No conversations yet.'})]));
 }
-const seconds=x=>x.finished_at?`${Math.max(0,new Date(x.finished_at)-new Date(x.started_at))} ms`:'unfinished';
+const duration=x=>x.finished_at?`${Math.max(0,new Date(x.finished_at)-new Date(x.started_at))} ms`:'unfinished';
 // Safe facts only: the API carries no message, passage, context or result values.
 function stepRows(step,attempts) {
-  const d=step.detail||{},rows=[`${step.status}${step.output?` → ${step.output}`:''}${step.error?` · ${step.error}`:''} · ${seconds(step)}`];
+  const d=step.detail||{},rows=[`${step.status}${step.output?` → ${step.output}`:''}${step.error?` · ${step.error}`:''} · ${duration(step)}`];
   const ref=e=>`${e.source} · ${e.document}${e.page!=null&&e.page!==e.document?` · ${e.page}`:''}`;
+  if(d.agent)rows.push(`agent ${d.agent}`);
   if(d.simulated)rows.push('simulated: no AI model was called');
   if(d.choice)rows.push(`choice ${d.choice} · probability ${d.probability}`);
   if(d.reason)rows.push(`failure route: ${d.reason}`);
@@ -286,10 +289,11 @@ function stepRows(step,attempts) {
   if(d.citations?.length)rows.push(`cited: ${d.citations.map(ref).join('; ')}`);
   for(const l of d.lookups||[])rows.push(`lookup ${l.action} returned fields: ${l.fields.join(', ')||'none'}`);
   if(d.context_fields)rows.push(`context fields: ${d.context_fields.join(', ')||'none'}`);
-  for(const a of attempts)rows.push(`${a.kind} ${a.target}${a.operation?` ${a.operation}`:''}${a.fallback?' (fallback)':''} ${a.status}${a.error?` · ${a.error}`:''} · ${seconds(a)}`+
-    `${a.served_model?` · served ${a.served_model}`:''}${a.prompt_tokens!=null?` · tokens ${a.prompt_tokens}/${a.completion_tokens}`:''}${a.cost_usd!=null?` · USD ${a.cost_usd}`:''}`);
+  rows.push(...attempts.map(attemptRow));
   return node('pre',{textContent:rows.join('\n')});
 }
+const attemptRow=a=>`${a.kind} ${a.target}${a.operation?` ${a.operation}`:''}${a.fallback?' (fallback)':''} ${a.status}${a.error?` · ${a.error}`:''} · ${duration(a)}`+
+  `${a.served_model?` · served ${a.served_model}`:''}${a.prompt_tokens!=null?` · tokens ${a.prompt_tokens}/${a.completion_tokens}`:''}${a.cost_usd!=null?` · USD ${a.cost_usd}`:''}`;
 const tags={same:'locate',changed:'changed in draft',absent:'not in draft',invalid:'find in JSON'};
 function locateStep(step,trace) {
   const v=trace.configuration_version,state=window.workflowEditor.step(step.step_id,step.type);
@@ -299,7 +303,7 @@ function locateStep(step,trace) {
   if(!where)return status_(`Step ${step.step_id} (version ${v}) was not found in the draft text. Configuration unchanged.`);
   status_(`Located ${step.step_id} ${where==='node'?'on the canvas':'in the draft JSON'}${state==='invalid'?' by text search, because the draft JSON is invalid':''}. `+
     `This turn ran published version ${v}, not the draft, whose settings may differ. Configuration unchanged.`);
-  if(matchMedia('(max-width:720px)').matches){previewPanel.hidden=true;previewToggle.setAttribute('aria-expanded','false');}
+  if(matchMedia('(max-width:720px)').matches)setPreviewOpen(false);
 }
 function traceBlock(turn,trace,index) {
   const buttons=turn.steps.map(step=>{
@@ -311,17 +315,21 @@ function traceBlock(turn,trace,index) {
     return [button,stepRows(step,turn.attempts.filter(a=>a.step_ordinal===step.ordinal))];
   }).flat();
   const loose=turn.attempts.filter(a=>a.step_ordinal==null);
-  if(loose.length)buttons.push(stepRows({status:'other attempts',started_at:0,finished_at:0},loose));
+  // Attempts outside any step visit (memory extraction, turns from before step recording).
+  if(loose.length)buttons.push(node('pre',{textContent:['other attempts',...loose.map(attemptRow)].join('\n')}));
   return node('details',{className:'trace',open:true},
     node('summary',{textContent:`Execution trace${index?` ${index}`:''} · version ${trace.configuration_version} · ${trace.mode} · ${turn.steps.length} step${turn.steps.length===1?'':'s'} · ${turn.status}${turn.error?` (${turn.error})`:''}`}),
     node('div',{className:'trace-steps'},...buttons));
 }
-async function loadShown() {
+// Opens the panel unless called by its own poll, which only refreshes a panel that is still open.
+async function loadShown(polled=false) {
   clearTimeout(tracePoll);
+  if(polled&&previewPanel.hidden)return;
   const business=selectedBusiness,id=shown.id;
   const [trace,chat]=await Promise.all([request(`${tracesPath()}/${id}`),shown.preview?request(`${previewPath()}/${id}`):null]);
   if(business!==selectedBusiness||shown?.id!==id)return;
-  previewPanel.hidden=false;previewToggle.setAttribute('aria-expanded','true');
+  if(polled&&previewPanel.hidden)return;
+  setPreviewOpen(true);
   const label=`${trace.mode==='simulation'?'Simulation':'Connected'} · version ${trace.configuration_version}`;
   document.querySelector('#preview-mode').textContent=label;
   const note=document.querySelector('#preview-note');note.hidden=false;
@@ -344,13 +352,13 @@ async function loadShown() {
     previewLog.replaceChildren(...items);
   } else previewLog.replaceChildren(...(trace.turns.length?trace.turns.map((t,i)=>traceBlock(t,trace,i+1)):[node('p',{className:'empty',textContent:'No automated turns.'})]));
   previewLog.scrollTop=previewLog.scrollHeight;
-  if(trace.turns.some(t=>['queued','running'].includes(t.status)))tracePoll=setTimeout(()=>loadShown().catch(()=>{}),1000);
+  if(trace.turns.some(t=>['queued','running'].includes(t.status)))tracePoll=setTimeout(()=>loadShown(true).catch(()=>{}),1000);
 }
 previewToggle.addEventListener('click',()=>{
-  if(!previewPanel.hidden){previewPanel.hidden=true;previewToggle.setAttribute('aria-expanded','false');return;}
-  previewPanel.hidden=false;previewToggle.setAttribute('aria-expanded','true');run(loadTraceList);
+  if(!previewPanel.hidden)return setPreviewOpen(false);
+  setPreviewOpen(true);run(async()=>{await loadTraceList();if(shown)await loadShown();});
 });
-document.querySelector('#preview-close').addEventListener('click',()=>{previewPanel.hidden=true;previewToggle.setAttribute('aria-expanded','false');previewToggle.focus();});
+document.querySelector('#preview-close').addEventListener('click',()=>{setPreviewOpen(false);previewToggle.focus();});
 document.querySelector('#preview-new').addEventListener('click',()=>run(async()=>{
   const {conversation}=await request(previewPath(),{});
   shown={id:conversation.id,preview:true};await loadShown();await loadTraceList();

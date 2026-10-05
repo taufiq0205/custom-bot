@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { action, active, agent, base, business, calls, cite, config, handoff, invitationToken, operator, owned, permit, publish, reply, script,
+import { action, active, agent, base, business, together, calls, cite, config, handoff, invitationToken, operator, owned, permit, publish, reply, script,
   sql, start, upload, wait } from './helpers.mjs';
 // Sign-ups first: Better Auth allows 3 per 10 s.
-const owner=await operator('traces-owner'),support=await operator('traces-support'),stranger=await operator('traces-stranger');
+const owner=await operator('traces-owner'),support=await operator('traces-support'),stranger=await operator('traces-stranger'),coowner=await operator('traces-coowner');
 const CHOICES={refund:'A refund, return or replacement',order_status:'Where an order is or when it arrives'};
 const answer=(choice,probabilities)=>({json:{model:'jev-1.13.0',answers:{route:{type:'choice',choice,confidence:0.9,probabilities},
   english:{type:'noul',noul:0.99}},usage:{input_tokens:376,output_tokens:56}}});
@@ -140,6 +140,15 @@ test('browser: an Owner previews a version, follows its trace to the draft witho
     await other.getByText('traces-browser Business — Support').waitFor();
     assert.equal(await other.getByRole('button',{name:'Manage traces-browser Business'}).count(),0);
     assert.equal(await other.getByRole('button',{name:'▷ Preview chat'}).isVisible(),false);
+    // Another Business's Owner: this Business is not listed at all, so there is nothing to manage, preview or trace.
+    const outsider=await (await browser.newContext({viewport:{width:1440,height:980}})).newPage();
+    await outsider.goto(base);
+    await outsider.getByLabel('Email',{exact:true}).fill(stranger.email);
+    await outsider.getByLabel('Password',{exact:true}).fill(stranger.password);
+    await outsider.getByRole('button',{name:'Sign in',exact:true}).click();
+    await outsider.getByRole('heading',{name:'Your Businesses'}).waitFor();
+    await outsider.getByLabel('Business name').waitFor();
+    assert.equal(await outsider.getByText('traces-browser Business').count(),0);
   } finally {await browser.close();}
 });
 
@@ -295,4 +304,41 @@ test('Traces: Support, other Businesses, signed-out and cross-origin clients are
   assert.equal((await stranger.request(paths(b).preview,{})).status,404);
   // Calls stayed scoped: the denied submissions queued nothing.
   assert.equal(sql(`SELECT count(*) FROM messages WHERE client_submission_id IN ('denied-message','cross-business')`),'0');
+});
+
+test('Races: a preview created during a publication pins one whole version; a demotion during preview and trace requests leaves no partial access',async()=>{
+  const b=await business('traces-races',{owner});
+  const key=`race-${crypto.randomUUID()}`,path=`/api/businesses/${b.id}/configuration`;
+  const doc=config({agents:[agent(`${key}.answer`)],steps:[{id:'answer',type:'agent',agent:'answer',final:true},handoff],links:[['answer','unsupported','support']]});
+  const saved=await owner.request(path,{text:JSON.stringify(doc),revision:(await owner.request(path)).data.revision});
+  await script(`${key}.answer`,[reply({outcome:'reply',reply:'Raced reply.'})]);
+  const [published,created]=await together([{path:path+'/publish',body:{revision:saved.data.revision},headers:{cookie:owner.cookie}},
+    {path:paths(b).preview,body:{},headers:{cookie:owner.cookie}}]);
+  assert.deepEqual([published.status,created.status],[201,201]);
+  const pinned=created.data.conversation;
+  // Whichever won, the preview reports one version and its own mode, and runs exactly that version.
+  assert.deepEqual([pinned.configuration_version,pinned.mode],pinned.configuration_version===1?[1,'simulation']:[2,'connected']);
+  const id=pinned.id,sent=await owner.request(`${paths(b).preview}/${id}/messages`,{client_submission_id:'race-ask-1',text:'Hello'});
+  assert.equal(sent.status,202);
+  let trace;
+  for(let i=0;i<120;i++){trace=await traceOf(b,id);if(trace.turns[0]?.status==='completed')break;await wait(250);}
+  assert.equal(trace.configuration_version,pinned.configuration_version);
+  assert.deepEqual(trace.turns[0].steps.map(s=>[s.step_id,s.detail]),pinned.configuration_version===1?[['reply',{agent:'assistant',simulated:true}]]:[['answer',{agent:'answer',citations:[]}]]);
+
+  // A co-Owner is demoted while sending a preview message and reading a trace: each request is wholly before or after it.
+  assert.equal((await owner.request(`/api/businesses/${b.id}/invitations`,{email:coowner.email,role:'Owner'})).status,201);
+  assert.equal((await coowner.request('/api/invitations/accept',{token:await invitationToken(coowner.email)})).status,200);
+  const member=(await owner.request(`/api/businesses/${b.id}/memberships`)).data.find(m=>m.operator_id===coowner.id);
+  const demotedId=`race-demoted-${crypto.randomUUID()}`;
+  const [demoted,message,read]=await together([
+    {path:`/api/businesses/${b.id}/memberships/${coowner.id}`,body:{role:'Support',active:true,revision:member.revision},headers:{cookie:owner.cookie}},
+    {path:`${paths(b).preview}/${id}/messages`,body:{client_submission_id:demotedId,text:'During demotion'},headers:{cookie:coowner.cookie}},
+    {path:paths(b).preview,body:{},headers:{cookie:coowner.cookie}}]);
+  assert.equal(demoted.status,200);
+  assert(message.status===202||message.status===404,String(message.status));
+  assert(read.status===201||read.status===404,String(read.status));
+  assert.equal(sql(`SELECT count(*) FROM messages WHERE client_submission_id='${demotedId}' AND conversation_id='${id}'`),message.status===202?'1':'0');
+  // Afterwards nothing is reachable.
+  assert.equal((await coowner.request(`${paths(b).traces}/${id}`)).status,404);
+  assert.equal((await coowner.request(paths(b).preview,{})).status,404);
 });
