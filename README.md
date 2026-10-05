@@ -18,19 +18,98 @@ The `local` Compose profile enables mail capture (set in `.env.example`). Only t
 
 Readiness checks migrations/database, worker heartbeat and SMTP. Inspect `docker compose ps` and `docker compose logs migrate app worker` when startup fails. An unapplied/failed migration prevents traffic. Migrations execute in order under a database advisory lock and record checksums; changed applied files fail rather than being silently rerun. Authentication SQL was generated from Better Auth 1.7.7. New migrations must use new numbered files.
 
-Explicit demo seed (two empty fictional Businesses; no fabricated chat/order/model behavior):
-
-```sh
-# First register and verify the account; then set its email in .env:
-# SEED_OWNER_EMAIL=your-verified-fixture@example.test
-docker compose --profile seed run --rm seed
-```
-
-Repeat seed commands leave existing Businesses/Memberships unchanged. Seeds never run during startup, and are rejected in `APP_MODE=hosted`. Seeding does not create or overwrite account credentials. Keep local mail capture limited to development.
+The explicit demo seed is described in [Portfolio demo](#portfolio-demo-northwind-kettles). Seeds never run during startup, and are rejected in `APP_MODE=hosted`. Keep local mail capture limited to development.
 
 Owners select **Manage** beside their Business to invite a verified Operator as Owner or Support, change a current Member's role, revoke access, or cancel a pending invitation. Invitation tokens arrive only at the intended email; the recipient signs in with that verified account and pastes the token into **Accept invitation**. Invitations expire after seven days, are single-use, and are superseded by a new invitation to the same email. Existing active Memberships cannot be overwritten through invitation acceptance. Revocation cancels pending invitations to that Member; demotion/revocation also cancels grants issued by that Owner. A fresh authorized invitation can restore revoked access. Every privileged request rechecks the current Business Membership; authority in another Business cannot grant access. Revocation does not require account sign-out. Concurrent changes preserve at least one active Owner.
 
 Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration, action-control, preview and trace APIs are Owner-only (below).
+
+## Portfolio demo (Northwind Kettles)
+
+One command prepares a complete, labelled demo of one fictional Business, **Northwind Kettles** (a small kettle and appliance shop). It covers website chat, cited knowledge answers, Customer memory, an authorized order lookup, Jev routing, handoff to the shared inbox and the Owner's trace view. It runs in simulation without any key, or connected with real providers.
+
+**Everything about Northwind Kettles is synthetic.** It is not a real business. Its documents, help site, products, orders and Customers are invented. Its keys protect nothing real. The files live in [`demo/`](demo):
+
+- `cert.pem`/`key.pem`: a local-only demo CA certificate for `northwind.demo.test`, and its key.
+- `customer-key.json`: the shop's Customer signing key. It is committed, so anyone with this repository can sign in as any demo Customer of the demo Business.
+- `demo.json`: the order API key.
+- `orders.json`, `documents/` and `site/`: the order data, policy documents and help site.
+
+That is why hosted mode refuses the demo settings and the seed.
+
+### What runs
+
+A `demo` Compose profile adds one bundled service, `demo` ([`demo/server.mjs`](demo/server.mjs)):
+
+- **HTTPS on the private Docker network as `northwind.demo.test`.** It serves Northwind Kettles' order API (`GET /orders?customer=…[&order_id=…]` with the `x-demo-key` header) and a static help site (`/help/`, with `robots.txt`). The order API returns only the requesting Customer's orders.
+- **HTTP on `127.0.0.1:3300`.** The demo shop page embeds the chat widget. Its backend holds the Customer signing key and signs a 10-minute ES256 assertion for the demo Customer `demo-customer-ada` when you click **Sign in as demo customer**. **Sign out** reloads the page without one, and the widget then ends the verified chat session.
+
+The worker reaches the demo service only when `DEMO_PUBLIC_HOSTS=northwind.demo.test` is set (exactly that one name) in `APP_MODE=local`, or in `test` for the test suite. Then that name may resolve to the private network, and its certificate is verified only through the demo CA, which verifies nothing else. Hosted mode refuses `DEMO_PUBLIC_HOSTS` and `DEMO_CA_FILE` at startup. Every other check stays: HTTPS, the approved origin, credentials, the ownership policy, schemas, robots.txt and the crawl scope. Readiness then reports `"demo": "northwind.demo.test: demo service, not a real business"`.
+
+### Prerequisites
+
+- Ports 3100, 8025 and 3300 must be free.
+- In `.env`:
+  - `COMPOSE_PROFILES=local,demo` and `DEMO_PUBLIC_HOSTS=northwind.demo.test`.
+  - `ACTION_CREDENTIAL_KEY` (`openssl rand -hex 32`), so the orders credential can be stored.
+  - `SEED_OWNER_EMAIL` and `SEED_OWNER_PASSWORD` for the Owner, and `SEED_SUPPORT_PASSWORD` for the demo Support Operator.
+- The embedding model, installed once: `docker compose run --rm models` (needs network).
+- Connected mode only: `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY` (and optionally `DASHSCOPE_API_KEY` for the Qwen fallback), plus `compose.connected.yaml` for outbound HTTPS (see Providers).
+
+### The command
+
+```sh
+docker compose up --build -d --wait
+docker compose run --rm models            # once
+# Open http://localhost:3100, create the SEED_OWNER_EMAIL account and verify it (code at http://localhost:8025).
+docker compose --profile seed run --rm seed                    # simulation, no keys
+
+# Connected, with real providers:
+docker compose -f compose.yaml -f compose.connected.yaml up -d --wait
+docker compose -f compose.yaml -f compose.connected.yaml --profile seed run --rm seed node dist/seed.js --connected
+```
+
+The seed signs in as the Owner and creates everything through the app's own APIs, so every authorization and validation check applies:
+
+- the Business, with a `demo_seeds` marker;
+- the Support Operator `support@northwind-kettles.test`, signed up, verified through Mailpit, invited and accepted;
+- the approved website origin `http://localhost:3300`, and the Customer signing key `northwind-demo-1`;
+- the orders credential `northwind-orders` (sent only to `https://northwind.demo.test`), and the ownership policy `own-orders` (`customer` → `customer_id`);
+- the sources: the policy PDF (`policies`, priority 1, page-level facts on returns, warranty and delivery), the care guide in Markdown (`care-guide`, priority 2), and the help site (`help-centre`, priority 3, crawled from `https://northwind.demo.test/help/`, never a third-party site);
+- the published workflow. A Jev `decision` (`policy`, `order` or `other`, threshold 0.6) leads to one of three routes:
+  - `policy`: retrieval, then the `policy` agent answers with citations;
+  - `order`: an `http` lookup of `my_orders`, then the `orders` agent answers;
+  - `other`, `uncertain`, `failure`, and an unsupported answer: handoff.
+
+  Both agents use `deepseek/deepseek-flash` with the `qwen3.7-plus-2026-05-26` fallback. The `orders` agent may also look up one order by number.
+- with `--connected` only: the Business's provider permissions (DeepSeek and Qwen generation and extraction, Jev decisions), and `generation.mode: "connected"`. Without it, the published workflow runs in simulation. The seed never revokes permissions it granted earlier; revoke them under **Cloud providers**.
+
+It then waits for ingestion and the crawl, and prints the shop link, `http://localhost:3300/?business=<id>`.
+
+A rerun creates only what is missing and prints `Already exists:` for the rest. Two concurrent runs serialize on a database lock. Changing modes publishes a new version.
+
+### Walkthrough
+
+1. **Chat with a cited answer.** Open the shop link and ask *"What is your returns policy?"*.
+   - Connected: the answer cites `northwind-policies.pdf, page 1`.
+   - Simulation: the reply is labelled simulated and contains no business facts. The trace still shows the passages retrieval found.
+2. **Memory** (connected). Click **Sign in as demo customer**, opt in under **Customer memory**, and say *"Please call me Ada and keep answers brief."* The next reply uses the preference, and the panel lists it. Product interests accept only a fixed list, and kettles are not on it. In simulation, opt-in and corrections work, but nothing is extracted.
+3. **Order lookup.** Signed in, ask *"Where is my order?"*. The worker calls the demo order API as `demo-customer-ada` and checks that the result is hers. It gets NK-1001 and NK-1002, never another Customer's NK-2001. Signed out, the assistant asks you to sign in.
+4. **Jev route.** Each message is first routed by Jev. Simulation sends no Jev request; it picks the choice whose description shares the most words with the message, and the trace labels that a keyword match.
+5. **Handoff.** Say *"hello"* (or anything outside policies and orders). The conversation waits for support. Sign in at http://localhost:3100 as `support@northwind-kettles.test`, open the Northwind Kettles inbox, claim it and reply.
+6. **Traces.** As the Owner, open **Traces** for that conversation. It shows:
+   - the Jev choice and probability (or the simulated keyword match);
+   - the retrieved and cited passages;
+   - the lookup's returned fields;
+   - each model call with tokens and cost;
+   - the published version it ran on.
+
+### Reset
+
+- **Restore the setup.** Rerun the seed. It republishes the demo configuration if it changed, and uploads a deleted source again. It also re-stores a revoked credential, re-approves a withdrawn origin and re-invites a removed Support Member.
+- **A new key.** The orders credential is encrypted with `ACTION_CREDENTIAL_KEY`. After changing that key, revoke `northwind-orders` (**Actions**) and rerun the seed.
+- **Start with no chat history in the shop.** Sign out, then clear the site data of `localhost:3300`.
+- **Wipe everything.** `docker compose down -v` deletes all local data: every Business, account and conversation, not only the demo's.
 
 ## Configuration (JSON)
 
@@ -176,7 +255,7 @@ A `decision` step asks Jev (TypeSafe) one typed question about the current Custo
 - **Bounds.** Each attempt has a 15-second wall-clock timeout within the 60-second deadline. A transient failure (timeout, connection error, 429, 529 or 5xx) gets one more attempt; 4xx refusals are not retried. Decision attempts do not use the 3 agent calls; the 20-step limit and the deadline bound them.
 - **Permission.** An Owner allows `jev`/`decision` per Business (**Team and website → Cloud providers → Allow Jev decisions**, or `POST /api/businesses/:id/provider-permissions/jev/decision`). The worker checks it before each attempt (without it nothing is sent and the step follows `failure`) and again before accepting the answer: revoking it while Jev answers discards the answer and stops the turn visibly to support, whatever the failure route leads to. As with generated text, what a decision routed to is delivered only while that permission stands.
 - **Records.** Each attempt is recorded and logged value-free, like generation: target `jev/<model>`, operation `decision`, status and reason, the served model (`jev-1.13.0`), input/output tokens, and a cost estimate from `PROVIDER_RATES` (Jev charges input tokens only, for example `{"jev/jev-1.13.0":[0.042,0]}`). Readiness reports Jev's endpoint and key state, never the key.
-- **Simulation mode.** Decisions run in simulation mode too, like HTTP steps, under the same permission and key.
+- **Simulation mode.** Simulation calls no engine. A decision step picks the choice whose description shares the most words with the message (`uncertain` when none do, or on a tie), and the trace labels it `simulated` (a keyword match, not inference). No attempt is recorded, and nothing is sent. Connected mode always routes with the selected engine.
 
 ## Preview chat and execution traces
 
@@ -309,6 +388,6 @@ npm test
 docker compose up -d --wait --remove-orphans
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests, and a document (or a website's first page) starting `[hold Ns]` holds its activation the same way. The test overlay also starts a controlled HTTPS `fixture` service (answering as `api.deepseek.com`, `dashscope-intl.aliyuncs.com` and `api.typesafe.ai` on the test network only, plus a business endpoint; `tests/fixture/`, test-only self-signed CA and synthetic worker keys) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md) and [knowledge validation](docs/validation-21.md) and [provider validation](docs/validation-28.md) and [website knowledge validation](docs/validation-22.md) and [decision validation](docs/validation-29.md) and [preview and trace validation](docs/validation-27.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests, and a document (or a website's first page) starting `[hold Ns]` holds its activation the same way. The test overlay also starts a controlled HTTPS `fixture` service (answering as `api.deepseek.com`, `dashscope-intl.aliyuncs.com` and `api.typesafe.ai` on the test network only, plus a business endpoint; `tests/fixture/`, test-only self-signed CA and synthetic worker keys) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. It also always starts the bundled `demo` service and enables `DEMO_PUBLIC_HOSTS` for it, exactly as a local demo does. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md) and [knowledge validation](docs/validation-21.md) and [provider validation](docs/validation-28.md) and [website knowledge validation](docs/validation-22.md) and [decision validation](docs/validation-29.md) and [preview and trace validation](docs/validation-27.md) and [portfolio demo validation](docs/validation-35.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.
