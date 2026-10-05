@@ -31,7 +31,7 @@ One command prepares a complete, labelled demo of one fictional Business, **Nort
 **Everything about Northwind Kettles is synthetic.** It is not a real business. Its documents, help site, products, orders and Customers are invented. Its keys protect nothing real. The files live in [`demo/`](demo):
 
 - `cert.pem`/`key.pem`: a local-only demo CA certificate for `northwind.demo.test`, and its key.
-- `customer-key.json`: the shop's Customer signing key. It is committed, so anyone with this repository can sign in as any demo Customer of the demo Business.
+- `customer-key.json`: the shop's Customer signing key. It is committed, so anyone with this repository can sign in as any demo Customer of the demo Business. Never register it for any other Business.
 - `demo.json`: the order API key.
 - `orders.json`, `documents/` and `site/`: the order data, policy documents and help site.
 

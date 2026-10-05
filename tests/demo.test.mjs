@@ -104,6 +104,10 @@ test('Demo seed: one documented command through the APIs; reruns, also concurren
     assert.match(stdout,/Already exists: published configuration version \d+ \(simulation\)/);
   }
   assert.deepEqual(await snapshot(),before);
+  // A seed stopped between creating the Business and recording its marker: the rerun adopts that Business instead of duplicating it.
+  sql(`DELETE FROM demo_seeds WHERE name='Northwind Kettles'`);
+  assert.deepEqual(created(seed()),[]);
+  assert.equal(sql(`SELECT business_id FROM demo_seeds WHERE name='Northwind Kettles'`),B);
   const again=seed();
   assert.deepEqual(created(again),[]);
   assert.equal(again.split('\n').filter(l=>l.startsWith('Already exists')).length,11);
@@ -116,6 +120,9 @@ test('Demo seed: one documented command through the APIs; reruns, also concurren
   // Another Operator cannot take the demo Business over by naming it.
   assert.throws(()=>compose('run','--rm',...env,'-e',`SEED_OWNER_EMAIL=${outsider.email}`,'-e',`SEED_OWNER_PASSWORD=${outsider.password}`,'seed'),
     e=>e.stderr.includes('SEED_OWNER_EMAIL is not its Owner'));
+  // Without the running demo service the seed stops with a clear message instead of pointing sources and lookups at nothing.
+  compose('stop','demo');
+  try {assert.throws(()=>seed(),e=>e.stderr.includes('Enable the demo service first'));} finally {compose('start','demo');}
   assert.deepEqual(await snapshot(),before);
 });
 
@@ -190,6 +197,17 @@ test('Demo walkthrough in simulation: labelled replies, simulated routes, retrie
   const ben=await customer(await assertionFor('demo-customer-ben'));
   await ben.ask('When will my order arrive?');
   assert.deepEqual((await lookups(ben.id)).map(r=>[r.customer_id,r.orders.map(o=>o.order_id)]),[['demo-customer-ben',['NK-2001']]]);
+
+  // Memory in simulation: the verified Customer opts in and states a preference; nothing is extracted without a model.
+  // The demo Customer persists across runs, so start from memory off; end with it off, so connected turns extract nothing.
+  const memory=`/conversations/${ada.id}/memory`;
+  let state=(await chat(memory,undefined,ada.token)).data;
+  if(state.enabled)state=(await chat(memory,{action:'disable',revision:state.revision},ada.token)).data;
+  const enabled=await chat(memory,{action:'enable',revision:state.revision,disclosure_version:'1'},ada.token);
+  assert.equal(enabled.status,200,JSON.stringify(enabled.data));
+  const corrected=await chat(memory,{action:'correct',revision:enabled.data.revision,kind:'preferred_name',value:'Ada'},ada.token);
+  assert.deepEqual(corrected.data.preferences.map(p=>[p.kind,p.value,p.provenance]),[['preferred_name','Ada','customer-correction']]);
+  assert.equal((await chat(memory,{action:'disable',revision:corrected.data.revision},ada.token)).data.enabled,false);
 
   // Anything else goes to the shared inbox, where Support sees it.
   const other=await ada.ask('hello');

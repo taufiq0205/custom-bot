@@ -2,7 +2,9 @@
 // through the app's own APIs, signed in as the Owner, so every authorization and validation check applies. Idempotent: a rerun
 // creates only what is missing and reports what already exists. `--connected` also grants the provider permissions and
 // publishes connected generation; without it the demo runs in simulation.
+import { get } from 'node:https';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { mode, origin, pool } from './config.js';
 if (mode === 'hosted') throw new Error('Demo seeding is disabled in hosted mode');
@@ -113,7 +115,11 @@ try {
   await lock.query('SELECT pg_advisory_lock(130035)');
   const ready = await fetch(`${api}/health/ready`).then(r => r.json());
   if (!String(ready.knowledge).startsWith('available')) throw new Error('Install the embedding model first: docker compose run --rm models');
-  if (!ready.demo) throw new Error('Enable the demo service first: DEMO_PUBLIC_HOSTS=northwind.demo.test and COMPOSE_PROFILES with demo (README, Portfolio demo)');
+  // The worker allowlists the demo host, and the demo service answers there (verified with the demo CA, as the worker does).
+  const answering = await new Promise(resolve => get({host: demo.host, path: '/robots.txt', ca: [readFileSync('/demo/cert.pem')], timeout: 5000},
+    r => {r.resume(); resolve(r.statusCode === 200);}).on('error', () => resolve(false)).on('timeout', function (this: any) {this.destroy();}));
+  if (!ready.demo || !answering)
+    throw new Error('Enable the demo service first: DEMO_PUBLIC_HOSTS=northwind.demo.test and COMPOSE_PROFILES with demo, then docker compose up -d --wait (README, Portfolio demo)');
   const as = await signIn(owner, false);
   let business = (await pool.query('SELECT business_id FROM demo_seeds WHERE name=$1', [demo.business])).rows[0]?.business_id as string | undefined;
   if (business) {
@@ -121,9 +127,12 @@ try {
       throw new Error(`${demo.business} exists, but SEED_OWNER_EMAIL is not its Owner`);
     report(false, `Business ${demo.business}`);
   } else {
-    business = expect(await as('/api/businesses', {name: demo.business}), [201], 'Business creation').id as string;
+    // An unmarked demo Business of this Owner (a seed stopped right after creating it) is adopted rather than duplicated.
+    const unmarked = (expect(await as('/api/businesses'), [200], 'Business listing') as {id: string, name: string, role: string}[])
+      .find(b => b.name === demo.business && b.role === 'Owner');
+    business = unmarked?.id ?? expect(await as('/api/businesses', {name: demo.business}), [201], 'Business creation').id as string;
     await pool.query('INSERT INTO demo_seeds(name,business_id) VALUES($1,$2)', [demo.business, business]);
-    report(true, `Business ${demo.business}`);
+    report(!unmarked, `Business ${demo.business}`);
   }
   const at = (path: string) => `/api/businesses/${business}/${path}`;
 
