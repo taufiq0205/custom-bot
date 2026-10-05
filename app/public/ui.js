@@ -141,7 +141,7 @@ let config=null;
 const editor=document.querySelector('#config-text');
 const configPath=()=>`/api/businesses/${selectedBusiness.id}/configuration`;
 // Switching Business or account drops the previous draft, so its text can never be saved elsewhere.
-function clearConfiguration(){config=null;clearTimeout(knowledgePoll);document.querySelector('#knowledge-sources').replaceChildren();window.workflowEditor.clear();document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
+function clearConfiguration(){closePreview();config=null;clearTimeout(knowledgePoll);document.querySelector('#knowledge-sources').replaceChildren();window.workflowEditor.clear();document.querySelector('#config-issues').replaceChildren();document.querySelector('#config-state').textContent='';}
 const discardEdits=()=>!config||editor.value===config.text||confirm('Discard your unsaved configuration edits?');
 function showConfiguration(validation) {
   document.querySelector('#config-state').textContent=`Draft revision ${config.revision} · published version ${config.published}`;
@@ -252,6 +252,130 @@ document.querySelector('#website-add').addEventListener('submit',event=>{
 });
 
 window.workflowEditor.setServices({run,save:saveConfiguration,loadPublished:()=>request(`${configPath()}/versions/${config.published}`)});
+
+// Owner preview chat and execution traces. Traces are read-only: locating a step selects it on the canvas or in the JSON text
+// of the current draft, and never edits, saves or reformats it. Each conversation runs its pinned published version, never the draft.
+const previewPanel=document.querySelector('#preview-panel'),previewLog=document.querySelector('#preview-log');
+const previewToggle=document.querySelector('#preview-toggle'),previewForm=document.querySelector('#preview-form');
+let shown=null,tracePoll;
+const previewPath=()=>`/api/businesses/${selectedBusiness.id}/preview`,tracesPath=()=>`/api/businesses/${selectedBusiness.id}/traces`;
+const node=(name,props={},...children)=>{const n=Object.assign(document.createElement(name),props);n.append(...children);return n;};
+// Closing also stops the trace poll, so a running turn never reopens the panel.
+function setPreviewOpen(open){previewPanel.hidden=!open;previewToggle.setAttribute('aria-expanded',String(open));if(!open)clearTimeout(tracePoll);}
+function closePreview(){
+  setPreviewOpen(false);shown=null;previewForm.hidden=true;
+  document.querySelector('#preview-note').hidden=true;document.querySelector('#preview-mode').textContent='';document.querySelector('#trace-list').replaceChildren();
+  previewLog.replaceChildren(node('p',{className:'empty',textContent:'Start a New chat on the latest published version, or open a recent conversation\'s trace.'}));
+}
+async function loadTraceList() {
+  const business=selectedBusiness,list=await request(tracesPath());
+  if(business!==selectedBusiness)return;
+  document.querySelector('#trace-list').replaceChildren(...(list.length?list.map(c=>{
+    const open=node('button',{type:'button',textContent:`Open trace ${c.id.slice(0,8)}`});
+    open.addEventListener('click',()=>run(async()=>{shown={id:c.id,preview:c.preview};await loadShown();}));
+    return node('li',{},node('span',{textContent:`${c.preview?'Preview':'Customer'} · version ${c.configuration_version} · ${c.mode} · ${new Date(c.last_message_at).toLocaleString()}`}),open);
+  }):[node('li',{textContent:'No conversations yet.'})]));
+}
+const duration=x=>x.finished_at?`${Math.max(0,new Date(x.finished_at)-new Date(x.started_at))} ms`:'unfinished';
+// Safe facts only: the API carries no message, passage, context or result values.
+function stepRows(step,attempts) {
+  const d=step.detail||{},rows=[`${step.status}${step.output?` → ${step.output}`:''}${step.error?` · ${step.error}`:''} · ${duration(step)}`];
+  const ref=e=>`${e.source} · ${e.document}${e.page!=null&&e.page!==e.document?` · ${e.page}`:''}`;
+  if(d.agent)rows.push(`agent ${d.agent}`);
+  if(d.simulated)rows.push('simulated: no AI model was called');
+  if(d.choice)rows.push(`choice ${d.choice} · probability ${d.probability}`);
+  if(d.reason)rows.push(`failure route: ${d.reason}`);
+  if(d.evidence)rows.push(d.evidence.length?`evidence: ${d.evidence.map(ref).join('; ')}`:'evidence: none found');
+  if(d.citations?.length)rows.push(`cited: ${d.citations.map(ref).join('; ')}`);
+  for(const l of d.lookups||[])rows.push(`lookup ${l.action} returned fields: ${l.fields.join(', ')||'none'}`);
+  if(d.context_fields)rows.push(`context fields: ${d.context_fields.join(', ')||'none'}`);
+  rows.push(...attempts.map(attemptRow));
+  return node('pre',{textContent:rows.join('\n')});
+}
+const attemptRow=a=>`${a.kind} ${a.target}${a.operation?` ${a.operation}`:''}${a.fallback?' (fallback)':''} ${a.status}${a.error?` · ${a.error}`:''} · ${duration(a)}`+
+  `${a.served_model?` · served ${a.served_model}`:''}${a.prompt_tokens!=null?` · tokens ${a.prompt_tokens}/${a.completion_tokens}`:''}${a.cost_usd!=null?` · USD ${a.cost_usd}`:''}`;
+const tags={same:'locate',changed:'changed in draft',absent:'not in draft',invalid:'find in JSON'};
+function locateStep(step,trace) {
+  const v=trace.configuration_version,state=window.workflowEditor.step(step.step_id,step.type);
+  if(state==='absent')return status_(`Step ${step.step_id} ran in version ${v} but is not in the current draft. Configuration unchanged.`);
+  if(state==='changed')return status_(`Step ${step.step_id} ran in version ${v} as a step of type ${step.type}; the current draft has another type under that ID. Configuration unchanged.`);
+  const where=window.workflowEditor.locate(step.step_id);
+  if(!where)return status_(`Step ${step.step_id} (version ${v}) was not found in the draft text. Configuration unchanged.`);
+  status_(`Located ${step.step_id} ${where==='node'?'on the canvas':'in the draft JSON'}${state==='invalid'?' by text search, because the draft JSON is invalid':''}. `+
+    `This turn ran published version ${v}, not the draft, whose settings may differ. Configuration unchanged.`);
+  if(matchMedia('(max-width:720px)').matches)setPreviewOpen(false);
+}
+function traceBlock(turn,trace,index) {
+  const buttons=turn.steps.map(step=>{
+    const state=window.workflowEditor.step(step.step_id,step.type);
+    const button=node('button',{type:'button',className:state==='same'||state==='invalid'?'':'gone'},
+      node('span',{textContent:`${step.ordinal}. ${step.step_id} · ${step.type}`}),node('span',{className:'tag',textContent:tags[state]}));
+    button.setAttribute('aria-label',`Trace step ${step.ordinal}: ${step.step_id} (${step.type}), ${tags[state]}`);
+    button.addEventListener('click',()=>locateStep(step,trace));
+    return [button,stepRows(step,turn.attempts.filter(a=>a.step_ordinal===step.ordinal))];
+  }).flat();
+  const loose=turn.attempts.filter(a=>a.step_ordinal==null);
+  // Attempts outside any step visit (memory extraction, turns from before step recording).
+  if(loose.length)buttons.push(node('pre',{textContent:['other attempts',...loose.map(attemptRow)].join('\n')}));
+  return node('details',{className:'trace',open:true},
+    node('summary',{textContent:`Execution trace${index?` ${index}`:''} · version ${trace.configuration_version} · ${trace.mode} · ${turn.steps.length} step${turn.steps.length===1?'':'s'} · ${turn.status}${turn.error?` (${turn.error})`:''}`}),
+    node('div',{className:'trace-steps'},...buttons));
+}
+// Opens the panel unless called by its own poll, which only refreshes a panel that is still open.
+async function loadShown(polled=false) {
+  clearTimeout(tracePoll);
+  if(polled&&previewPanel.hidden)return;
+  const business=selectedBusiness,id=shown.id;
+  const [trace,chat]=await Promise.all([request(`${tracesPath()}/${id}`),shown.preview?request(`${previewPath()}/${id}`):null]);
+  if(business!==selectedBusiness||shown?.id!==id)return;
+  if(polled&&previewPanel.hidden)return;
+  setPreviewOpen(true);
+  const label=`${trace.mode==='simulation'?'Simulation':'Connected'} · version ${trace.configuration_version}`;
+  document.querySelector('#preview-mode').textContent=label;
+  const note=document.querySelector('#preview-note');note.hidden=false;
+  note.textContent=`${trace.preview?'Preview':'Customer'} conversation ${id.slice(0,8)}, pinned to published version ${trace.configuration_version} (${trace.mode}).`+
+    (Number(trace.configuration_version)!==Number(config?.published)?` Version ${config?.published} is published now; New chat uses it.`:'')+
+    ' The canvas shows your current draft, not what ran.'+
+    (trace.preview&&trace.control_state!=='automated'?' This preview was handed to support; previews never reach the inbox, so start a New chat.':'');
+  previewForm.hidden=!(trace.preview&&trace.control_state==='automated');
+  const turns=new Map(trace.turns.map(t=>[t.message_id,t]));
+  const who=m=>m.author==='customer'?'You':m.author==='system'?'Notice':m.simulated?'Simulated assistant':'Assistant';
+  if(chat) {
+    // Each turn's trace follows its last message: its reply or notice, or the Customer message when nothing was delivered.
+    const items=[];
+    chat.messages.forEach((m,i)=>{
+      items.push(m.author==='customer'?node('div',{className:'msg customer',textContent:m.text}):node('div',{className:`msg ${m.author==='system'?'system':'agent'}`},
+        ...(m.author==='system'?[]:[node('div',{className:'msg-meta'},who(m),node('span',{className:'tag',textContent:label}))]),m.text));
+      const turn=turns.get(m.reply_to??m.id);
+      if(turn&&!chat.messages.slice(i+1).some(x=>x.reply_to===turn.message_id))items.push(traceBlock(turn,trace));
+    });
+    previewLog.replaceChildren(...items);
+  } else previewLog.replaceChildren(...(trace.turns.length?trace.turns.map((t,i)=>traceBlock(t,trace,i+1)):[node('p',{className:'empty',textContent:'No automated turns.'})]));
+  previewLog.scrollTop=previewLog.scrollHeight;
+  if(trace.turns.some(t=>['queued','running'].includes(t.status)))tracePoll=setTimeout(()=>loadShown(true).catch(()=>{}),1000);
+}
+previewToggle.addEventListener('click',()=>{
+  if(!previewPanel.hidden)return setPreviewOpen(false);
+  setPreviewOpen(true);run(async()=>{await loadTraceList();if(shown)await loadShown();});
+});
+document.querySelector('#preview-close').addEventListener('click',()=>{setPreviewOpen(false);previewToggle.focus();});
+document.querySelector('#preview-new').addEventListener('click',()=>run(async()=>{
+  const {conversation}=await request(previewPath(),{});
+  shown={id:conversation.id,preview:true};await loadShown();await loadTraceList();
+  status_(`New preview chat pinned to published version ${conversation.configuration_version} (${conversation.mode}).`);
+}));
+// A rejected message stays in the box; retrying the same text reuses its submission ID, so it is never sent twice.
+let pendingPreview=null;
+previewForm.addEventListener('submit',event=>{
+  event.preventDefault();
+  const input=previewForm.elements.text,text=input.value.trim();
+  if(!shown?.preview||!text)return;
+  run(async()=>{
+    if(pendingPreview?.text!==text||pendingPreview.conversation!==shown.id)pendingPreview={id:`preview-${crypto.getRandomValues(new Uint32Array(4)).join('-')}`,text,conversation:shown.id};
+    await request(`${previewPath()}/${shown.id}/messages`,{client_submission_id:pendingPreview.id,text});
+    pendingPreview=null;input.value='';await loadShown();await loadTraceList();
+  });
+});
 
 // Shared inbox. Polling refreshes the list and open conversation but never touches reply drafts, and never adopts a newer revision:
 // actions carry the revision the Operator last opened or acted on, so the server rejects them after someone else changed control.

@@ -7,7 +7,7 @@ import { origin as platform, pool } from './config.js';
 import { body, Failure, keys, message as submitted, uuid, verifier } from './memberships.js';
 const route=new RegExp(`^/api/chat/(${uuid})/(?:(identity|logout)|conversations(?:/(${uuid})(/messages|/handoff|/memory)?)?)$`);
 const conversationColumns='c.id,c.control_state,c.configuration_version,p.document->\'generation\'->>\'mode\' AS mode';
-type Session={id:string,customer_id:string|null};
+export type Session={id:string,customer_id:string|null};
 const expired=()=>new Failure(401,'Chat session expired; start a new conversation');
 const rejected=()=>new Failure(401,'Identity assertion rejected');
 // Logout/switch end a session; a verified session also ends when its assertion expires.
@@ -18,7 +18,7 @@ async function current(client:PoolClient,business:string,token:string,lock='') {
 // A verified session reaches its Customer's conversations; an anonymous session only its own anonymous ones.
 const owned='c.business_id=$1 AND (c.customer_id=$2 OR ($2::uuid IS NULL AND c.customer_id IS NULL AND c.session_id=$3))';
 const scope=(business:string,session:Session)=>[business,session.customer_id,session.id];
-async function conversation(client:PoolClient,business:string,session:Session,id:string) {
+export async function conversation(client:PoolClient,business:string,session:Session,id:string) {
   // Messages first: a turn's outcome and its control change commit together, so a settled message guarantees the later read
   // shows that control state (the reverse order could pair a failed turn with the state from before it).
   // Operator identities and submission IDs stay internal.
@@ -30,17 +30,17 @@ async function conversation(client:PoolClient,business:string,session:Session,id
   if(!found.rowCount)throw new Failure(404,'Conversation not found');
   return {...found.rows[0],messages:messages.rows};
 }
-async function open(client:PoolClient,business:string,customer?:{id:string,kid:string,exp:number}) {
+export async function open(client:PoolClient,business:string,customer?:{id:string,kid:string,exp:number}) {
   const token=randomBytes(32).toString('hex'),id=randomUUID();
   await client.query('INSERT INTO chat_sessions(id,business_id,token_verifier,customer_id,signing_kid,expires_at) VALUES($1,$2,$3,$4,$5,to_timestamp($6))',
     [id,business,verifier(token),customer?.id??null,customer?.kid??null,customer?.exp??null]);
   return {token,session:{id,customer_id:customer?.id??null}};
 }
 // New conversations pin the Business's current published configuration.
-async function start(client:PoolClient,business:string,session:Session) {
+export async function start(client:PoolClient,business:string,session:Session,preview=false) {
   const id=randomUUID();
-  await client.query(`INSERT INTO conversations(id,business_id,session_id,customer_id,configuration_version)
-    SELECT $1,$2,$3,$4,max(version) FROM published_configurations WHERE business_id=$2`,[id,business,session.id,session.customer_id]);
+  await client.query(`INSERT INTO conversations(id,business_id,session_id,customer_id,configuration_version,preview)
+    SELECT $1,$2,$3,$4,max(version),$5 FROM published_configurations WHERE business_id=$2`,[id,business,session.id,session.customer_id,preview]);
   return id;
 }
 // Lock the conversation first: every turn and control transition takes this lock before its own checks.
@@ -73,6 +73,28 @@ async function verify(business:string,assertion:string) {
     if(error instanceof errors.JOSEError||error instanceof Failure)throw rejected();
     throw error;
   }
+}
+// One Customer message in the caller's transaction, after its session check: a new message queues a turn (status 202);
+// a retried submission returns the original (200) and never enqueues new work.
+export async function submit(client:PoolClient,business:string,session:Session,id:string,submission:string,text:string):Promise<[number,unknown]> {
+  const locked=await lock(client,business,session,id);
+  const automated=locked.control_state==='automated';
+  const columns='id,client_submission_id,text,turn_state,created_at';
+  // Under human control the message waits for support and never starts an automated turn.
+  const inserted=await client.query(`INSERT INTO messages(id,business_id,conversation_id,author,text,client_submission_id,turn_state,session_id)
+    VALUES($1,$2,$3,'customer',$4,$5,$7,$6) ON CONFLICT(conversation_id,client_submission_id) DO NOTHING RETURNING ${columns}`,[randomUUID(),business,id,text,submission,session.id,automated?'queued':'human']);
+  if(!inserted.rowCount) {
+    // A retried submission returns the original message whatever its turn state.
+    const existing=(await client.query(`SELECT ${columns} FROM messages WHERE conversation_id=$1 AND client_submission_id=$2 AND author='customer'`,[id,submission])).rows[0];
+    if(existing?.text!==text)throw new Failure(409,'Submission ID already used for a different message');
+    return [200,existing];
+  }
+  const message=inserted.rows[0];
+  if(locked.control_state==='resolved')await reopen(client,business,id,locked.assignee_id!);
+  if(automated)await client.query(`INSERT INTO jobs(id,business_id,kind,conversation_id,message_id,idempotency_key,execution_generation,deadline)
+    VALUES($1,$2,'turn',$3,$4,$5,$6,clock_timestamp()+interval '60 seconds')`,[randomUUID(),business,id,message.id,`turn:${message.id}`,locked.execution_generation]);
+  await client.query('UPDATE conversations SET last_message_at=clock_timestamp() WHERE id=$1',[id]);
+  return [202,message];
 }
 // Customer chat runs on Business websites: authority is the session bearer token plus an approved Origin, never cookies.
 export async function chat(req:IncomingMessage,res:ServerResponse,path:string,json:(status:number,value:unknown)=>void) {
@@ -192,26 +214,9 @@ export async function chat(req:IncomingMessage,res:ServerResponse,path:string,js
     await client.query('BEGIN');
     // Recheck the session under a share lock so logout/switch and this submission serialize.
     if(!await current(client,business,token!,'FOR SHARE'))throw expired();
-    const locked=await lock(client,business,session,id);
-    const automated=locked.control_state==='automated';
-    const columns='id,client_submission_id,text,turn_state,created_at';
-    // Under human control the message waits for support and never starts an automated turn.
-    const inserted=await client.query(`INSERT INTO messages(id,business_id,conversation_id,author,text,client_submission_id,turn_state,session_id)
-      VALUES($1,$2,$3,'customer',$4,$5,$7,$6) ON CONFLICT(conversation_id,client_submission_id) DO NOTHING RETURNING ${columns}`,[randomUUID(),business,id,text,submission,session.id,automated?'queued':'human']);
-    if(!inserted.rowCount) {
-      // A retried submission returns the original message whatever its turn state; it never enqueues new work.
-      const existing=(await client.query(`SELECT ${columns} FROM messages WHERE conversation_id=$1 AND client_submission_id=$2 AND author='customer'`,[id,submission])).rows[0];
-      if(existing?.text!==text)throw new Failure(409,'Submission ID already used for a different message');
-      await client.query('COMMIT');
-      return reply(200,{message:existing});
-    }
-    const message=inserted.rows[0];
-    if(locked.control_state==='resolved')await reopen(client,business,id,locked.assignee_id!);
-    if(automated)await client.query(`INSERT INTO jobs(id,business_id,kind,conversation_id,message_id,idempotency_key,execution_generation,deadline)
-      VALUES($1,$2,'turn',$3,$4,$5,$6,clock_timestamp()+interval '60 seconds')`,[randomUUID(),business,id,message.id,`turn:${message.id}`,locked.execution_generation]);
-    await client.query('UPDATE conversations SET last_message_at=clock_timestamp() WHERE id=$1',[id]);
+    const [status,message]=await submit(client,business,session,id,submission,text);
     await client.query('COMMIT');
-    return reply(202,{message});
+    return reply(status,{message});
   } catch(error) {
     await client?.query('ROLLBACK');
     if(error instanceof Failure)return reply(error.status,{error:error.message});

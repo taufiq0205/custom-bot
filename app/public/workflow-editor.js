@@ -409,6 +409,21 @@ window.workflowEditor={
  shown(){if(view==='visual'&&documentDraft){drawGraph();fitView();}},
  refreshActions(){renderIssues();},
  getText(){return code.value;},
+ // Trace navigation, read-only: never edits, saves, reformats or switches view.
+ // A step that ran, as the current draft has it: 'same', 'changed' (another type), 'absent', or 'invalid' (unparseable JSON).
+ step(id,type){
+  let doc=view==='visual'?documentDraft:null;
+  if(!doc)try{doc=JSON.parse(code.value);}catch{return 'invalid';}
+  const step=Array.isArray(doc?.workflow?.steps)?doc.workflow.steps.find(s=>s?.id===id):null;
+  return !step?'absent':step.type===type?'same':'changed';
+ },
+ // Selects the node on the canvas, or (JSON view) selects the step's ID in the text. Returns 'node', 'json' or null.
+ locate(id){
+  if(view==='visual'&&documentDraft){if(!stepOf(documentDraft,id))return null;select(id);centerOn(id);return 'node';}
+  const from=Math.max(0,code.value.indexOf('"steps"')),pattern=new RegExp(`"id"\\s*:\\s*${JSON.stringify(id).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`,'g');
+  pattern.lastIndex=from;const match=pattern.exec(code.value);
+  if(!match)return null;jump(match.index,match[0].length);return 'json';
+ },
  getValidation(){return validationForCurrentText();}
 };
 })();

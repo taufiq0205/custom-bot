@@ -315,6 +315,8 @@ class Turn:
         self.permits = {}
         self.memory = None
         self.memory_error = False
+        # Value-free facts about the step being run, for its trace record.
+        self.detail = {}
         self.ordinary_retry = False
         customer = None
         try:
@@ -359,11 +361,13 @@ class Turn:
             (vector, vector, self.job[1], self.job[1], step['sources'], EMBEDDER.encoding, self.job[1], TESTING)).fetchall()
         priority = {s['id']: s['priority'] for s in self.document.get('sources', [])}
         self.evidence = self.evidence or []
-        seen = {e['chunk'] for e in self.evidence}
+        seen, before = {e['chunk'] for e in self.evidence}, len(self.evidence)
         for chunk, version, ref, document, page, text in rows:
             if chunk not in seen:
                 self.evidence.append({'chunk': chunk, 'version_id': version, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
                                       'priority': priority[ref], 'document': document, 'page': page, 'text': text})
+        # The trace references the passages this step added, never their text.
+        self.detail['evidence'] = [reference(e) for e in self.evidence[before:]]
 
     def left(self):
         # Keep half a second to record the outcome before the database deadline.
@@ -397,10 +401,10 @@ class Turn:
                     self.connection.execute("UPDATE jobs SET lease_expires_at=least(greatest(lease_expires_at,clock_timestamp()+make_interval(secs => %s)),deadline) "
                                             "WHERE id=%s", (bound + 2, self.job[0]))
                 attempt = self.connection.execute(
-                    "INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation,fallback) "
-                    "VALUES(%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN clock_timestamp() END,%s,%s) RETURNING id",
+                    "INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation,fallback,step_ordinal) "
+                    "VALUES(%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN clock_timestamp() END,%s,%s,%s) RETURNING id",
                     (self.job[1], self.job[0], step, kind, target, 'failed' if denied else 'started', denied, bool(denied),
-                     permit and permit[1], fallback)).fetchone()[0]
+                     permit and permit[1], fallback, self.steps)).fetchone()[0]
         # Raised after commit, so a visible session-ended failure recorded by current() is kept.
         if not held:
             raise Lost()
@@ -546,6 +550,7 @@ class Turn:
             return None
         self.context.update(result)
         self.observed.update(result)
+        self.detail.setdefault('lookups', []).append({'action': action['id'], 'fields': sorted(result)})
         return result
 
     def agent(self, step):
@@ -553,7 +558,9 @@ class Turn:
         final = step['final']
         if final:
             self.final_step = step
+        self.detail['agent'] = agent['id']
         if self.document['generation']['mode'] == 'simulation':
+            self.detail['simulated'] = True
             return ('reply', SIMULATED) if final else ('next', {})
         model = agent.get('model')
         if not model:
@@ -611,6 +618,9 @@ class Turn:
                 # The platform, not the model, turns cited IDs into document/page references.
                 value, cited = value
                 self.citations = list({(e['source'], e['document'], e['page']): e for e in evidence or [] if e['id'] in cited}.values())
+                self.detail['citations'] = [reference(e) for e in self.citations]
+            if output == 'next':
+                self.detail['context_fields'] = sorted(value)
             if output != 'action':
                 return output, value
             # The same central checks as an HTTP step; a failed or denied request follows the agent's unsupported output.
@@ -633,7 +643,8 @@ class Turn:
             return self.refuse(step['id'], target, 'decision unavailable: TYPESAFE_API_KEY not set')
         try:
             return self.retried('decision', lambda _: self.judge(step, target))
-        except Rejected:
+        except Rejected as failure:
+            self.detail['reason'] = str(failure)
             return 'failure'
 
     def refuse(self, step, target, error):
@@ -641,11 +652,13 @@ class Turn:
         with self.connection.transaction():
             held = current(self.connection, self.job)
             if held:
-                self.connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation) "
-                                        "VALUES(%s,%s,%s,'provider',%s,'failed',%s,clock_timestamp(),'decision')", (self.job[1], self.job[0], step, target, error))
+                self.connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation,step_ordinal) "
+                                        "VALUES(%s,%s,%s,'provider',%s,'failed',%s,clock_timestamp(),'decision',%s)",
+                                        (self.job[1], self.job[0], step, target, error, self.steps))
         if not held:
             raise Lost()
         print(f'Provider attempt job={self.job[0]} step={step} {target} decision failed in 0.00s error={error}', flush=True)
+        self.detail['reason'] = error
         return 'failure'
 
     def judge(self, step, target):
@@ -665,7 +678,7 @@ class Turn:
                 raise Rejected('malformed decision output')
             if isinstance(data, dict):
                 measured = measure('jev', data)
-            route = decision_route(data, step['choices'], step['min_probability'])
+            route, choice, probability = decision_route(data, step['choices'], step['min_probability'])
             with self.connection.transaction():
                 held = current(self.connection, self.job, True)
                 accepted = held and permitted(self.connection, self.job[1], 'jev', 'decision') == revision
@@ -679,6 +692,8 @@ class Turn:
                 raise Stop(FAILED, 'provider permission changed')
             # Like generated text, whatever this decision routed to is delivered only while its permission stands.
             self.permits[('jev', 'decision')] = revision
+            # The trace shows the top choice and its probability, also when it fell below the threshold.
+            self.detail.update(choice=choice, probability=probability)
             return route
         except (Transient, Rejected, Stop) as failure:
             error = str(failure)
@@ -704,29 +719,66 @@ class Turn:
             if self.steps > MAX_STEPS:
                 raise Stop(EXHAUSTED, 'step budget exhausted')
             self.left()
-            kind = step['type']
-            if kind == 'handoff':
-                return 'handoff', None
-            if kind == 'retrieval':
-                self.retrieve(step)
-                output = 'next'
-            elif kind == 'condition':
-                value = self.context.get(step['field'])
-                output = 'yes' if same(value, step['equals']) else 'fallback'
-            elif kind == 'http':
-                output = self.http(step)
-            elif kind == 'decision':
-                output = self.decide(step)
-            else:
-                output, value = self.agent(step)
-                if output == 'reply':
-                    return 'reply', value
-                if output == 'next':
-                    if self.observed & value.keys():
-                        # An agent cannot replace a verified business result with its own value.
-                        raise Stop(FAILED, 'agent tried to overwrite an observed result')
-                    self.context.update(value)
+            output, value = self.traced(step)
+            if output in ('reply', 'handoff'):
+                return output, value
             step = steps[links[(step['id'], output)]]
+
+    def traced(self, step):
+        """One step, recorded when it starts and when it ends (with its route, or why the turn stopped in it). A record left at
+        'started' means the worker stopped mid-step. Whether anything was delivered is the job's outcome, decided later.
+        Like the steps themselves, the records are written without the turn's authority check: a turn that lost its lease still
+        records what it ran, and the job's outcome shows that nothing of it was delivered."""
+        record = self.connection.execute('INSERT INTO execution_steps(business_id,job_id,ordinal,step_id,type) VALUES(%s,%s,%s,%s,%s) RETURNING id',
+                                         (self.job[1], self.job[0], self.steps, step['id'], step['type'])).fetchone()[0]
+        self.detail, status, output, error = {}, 'failed', None, 'unexpected worker error'
+        try:
+            output, value = self.visit(step)
+            status, error = 'succeeded', None
+            return output, value
+        except Clarify:
+            status, output, error = 'succeeded', 'clarification', None
+            raise
+        except Stop as stop:
+            error = stop.error
+            raise
+        except Lost:
+            error = 'turn lost its authority (control change, lease or session)'
+            raise
+        finally:
+            try:
+                self.connection.execute("UPDATE execution_steps SET status=%s,output=%s,error=%s,detail=%s::jsonb,finished_at=clock_timestamp() WHERE id=%s",
+                                        (status, output, error, json.dumps(self.detail) if self.detail else None, record))
+            except psycopg.Error:
+                # A lost connection must not mask the original failure; the record stays 'started' and reads as interrupted.
+                if status == 'succeeded':
+                    raise
+
+    def visit(self, step):
+        kind = step['type']
+        if kind == 'handoff':
+            return 'handoff', None
+        if kind == 'retrieval':
+            self.retrieve(step)
+            return 'next', None
+        if kind == 'condition':
+            return 'yes' if same(self.context.get(step['field']), step['equals']) else 'fallback', None
+        if kind == 'http':
+            return self.http(step), None
+        if kind == 'decision':
+            return self.decide(step), None
+        output, value = self.agent(step)
+        if output == 'next':
+            if self.observed & value.keys():
+                # An agent cannot replace a verified business result with its own value.
+                raise Stop(FAILED, 'agent tried to overwrite an observed result')
+            self.context.update(value)
+        return output, value
+
+
+def reference(evidence):
+    """What a trace may show of a passage: where it came from, not what it says."""
+    return {k: evidence[k] for k in ('source', 'document', 'page')}
 
 
 def literal(vector):
@@ -757,8 +809,8 @@ def same(a, b):
 
 def decision_route(data, choices, threshold):
     """Jev's answers, each validated on its own: shape, the choice name, its probabilities, the language, and only then the
-    threshold, applied to the validated probability of the choice (not the reported confidence). Returns the choice name or
-    'uncertain'; raises Rejected."""
+    threshold, applied to the validated probability of the choice (not the reported confidence). Returns the route (the choice
+    name or 'uncertain'), the choice and its probability; raises Rejected."""
     def probability(v):
         return isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1
     answers = data.get('answers') if isinstance(data, dict) else None
@@ -776,7 +828,7 @@ def decision_route(data, choices, threshold):
         raise Rejected('decision probabilities do not match the choices')
     if english['noul'] < 0.5:
         raise Rejected('unsupported language')
-    return choice if probabilities[choice] >= threshold else 'uncertain'
+    return choice if probabilities[choice] >= threshold else 'uncertain', choice, probabilities[choice]
 
 
 def refusal_type(response):
