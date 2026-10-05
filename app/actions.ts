@@ -4,8 +4,9 @@ import { createCipheriv, randomBytes } from 'node:crypto';
 import { credentialKey, pool } from './config.js';
 import { FIELD, publicHttps, REF } from './configuration.js';
 import { body, Failure, keys, uuid } from './memberships.js';
-const PROVIDERS=['deepseek','qwen'],OPERATIONS=['generation','extraction'];
-const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63})|(provider-permissions)(?:/(${PROVIDERS.join('|')})/(${OPERATIONS.join('|')}))?)$`);
+// The provider/operation pairs a Business can permit: DeepSeek and Qwen generate and extract, Jev only decides.
+const PAIRS=['deepseek/generation','deepseek/extraction','qwen/generation','qwen/extraction','jev/decision'];
+const route=new RegExp(`^/api/businesses/(${uuid})/(?:(action-controls)|(credentials|authorization-policies)(?:/(${REF.source.slice(1,-1)})/(revoke))?|actions/([A-Za-z][A-Za-z0-9_-]{0,63})|(provider-permissions)(?:/(${PAIRS.join('|')}))?)$`);
 // Visible ASCII; no CR/LF can reach a request header.
 const SECRET=/^[\x21-\x7e](?:[\x20-\x7e]{0,4094}[\x21-\x7e])?$/;
 
@@ -20,7 +21,8 @@ function seal(business:string,ref:string,secret:string) {
 export async function actions(req:IncomingMessage,path:string,user:{id:string},json:(status:number,value:unknown)=>void) {
   const match=path.match(route);
   if(!match)return false;
-  const [,business,controls,resource,ref,revoke,action,permissions,provider,operation]=match;
+  const [,business,controls,resource,ref,revoke,action,permissions,pair]=match;
+  const [provider,operation]=pair?.split('/')??[];
   const listing=controls||(permissions&&!provider);
   let client:PoolClient|undefined;
   try {
@@ -38,10 +40,12 @@ export async function actions(req:IncomingMessage,path:string,user:{id:string},j
       const granted=(await client.query('SELECT provider,operation,allowed,revision,updated_at FROM provider_permissions WHERE business_id=$1',[business])).rows;
       const worker=(await client.query("SELECT generation FROM worker_health WHERE id='worker'")).rows[0];
       const published=(await client.query('SELECT version,document FROM published_configurations WHERE business_id=$1 ORDER BY version DESC LIMIT 1',[business])).rows[0];
-      result={permissions:PROVIDERS.flatMap(p=>OPERATIONS.map(o=>granted.find(g=>g.provider===p&&g.operation===o)??{provider:p,operation:o,allowed:false,revision:null,updated_at:null})),
+      const {decision}=published.document;
+      result={permissions:PAIRS.map(x=>x.split('/')).map(([p,o])=>granted.find(g=>g.provider===p&&g.operation===o)??{provider:p,operation:o,allowed:false,revision:null,updated_at:null}),
         providers:worker?.generation??null,
         selected:{version:published.version,mode:published.document.generation.mode,agents:published.document.agents.filter((a:any)=>a.model).map((a:any)=>
-          ({agent:a.id,model:`${a.model.provider}/${a.model.name}`,fallback:a.model.fallback?`${a.model.fallback.provider}/${a.model.fallback.name}`:null}))}};
+          ({agent:a.id,model:`${a.model.provider}/${a.model.name}`,fallback:a.model.fallback?`${a.model.fallback.provider}/${a.model.fallback.name}`:null})),
+          decision:decision?{engine:decision.engine,model:decision.model??(decision.engine==='jev'?'jev-latest':'default')}:null}};
     } else if(listing) {
       result={credentials:(await client.query('SELECT ref,origin,header,active,revision,updated_at FROM action_credentials WHERE business_id=$1 ORDER BY ref',[business])).rows,
         policies:(await client.query('SELECT ref,customer_parameter,owner_field,active,revision,updated_at FROM authorization_policies WHERE business_id=$1 ORDER BY ref',[business])).rows,

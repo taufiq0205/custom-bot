@@ -279,20 +279,23 @@ test('Providers: Owner-only controls, readiness disclosure, fallback validation 
     deepseek:{endpoint:'https://api.deepseek.com',key:'configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run',role:'final replies'},
     qwen:{endpoint:QWEN_BASE,key:'configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run',
       role:'one fallback attempt after a transient DeepSeek failure, or an agent\'s selected model; when permitted',
-      processing:'Singapore access and static storage; inference potentially worldwide excluding Chinese mainland (not Singapore-only processing)'}});
+      processing:'Singapore access and static storage; inference potentially worldwide excluding Chinese mainland (not Singapore-only processing)'},
+    jev:{endpoint:'https://api.typesafe.ai/v1/systemone',key:'configured (outbound calls need compose.connected.yaml); account and model access not verified until a measured run',
+      role:'typed workflow decisions (routing only), when permitted'}});
 
   const b=await business('providers-controls',{owner});
   assert.equal((await owner.request(`/api/businesses/${b.id}/invitations`,{email:support.email,role:'Support'})).status,201);
   assert.equal((await support.request('/api/invitations/accept',{token:await invitationToken(support.email)})).status,200);
   const path=`/api/businesses/${b.id}/provider-permissions`;
   const listing=(await owner.request(path)).data;
-  assert.deepEqual(listing.providers,{deepseek:readiness.generation.deepseek,qwen:readiness.generation.qwen});
-  assert.deepEqual(listing.selected,{version:1,mode:'simulation',agents:[]});
+  assert.deepEqual(listing.providers,{deepseek:readiness.generation.deepseek,qwen:readiness.generation.qwen,jev:readiness.generation.jev});
+  assert.deepEqual(listing.selected,{version:1,mode:'simulation',agents:[],decision:null});
   assert.deepEqual(listing.permissions.map(p=>[p.provider,p.operation,p.allowed]),
-    [['deepseek','generation',true],['deepseek','extraction',false],['qwen','generation',false],['qwen','extraction',false]]);
+    [['deepseek','generation',true],['deepseek','extraction',false],['qwen','generation',false],['qwen','extraction',false],['jev','decision',false]]);
   for(const who of [support,outsider]) {
     assert.equal((await who.request(path)).status,404);
     assert.equal((await who.request(path+'/qwen/generation',{allowed:true})).status,404);
+    assert.equal((await who.request(path+'/jev/decision',{allowed:true})).status,404);
   }
   assert.equal((await owner.request(path+'/qwen/generation',{allowed:true},{headers:{origin:'https://evil.example'}})).status,403);
   assert.equal((await owner.request(path+'/qwen/generation',{allowed:'yes'})).status,400);
@@ -311,7 +314,7 @@ test('Providers: Owner-only controls, readiness disclosure, fallback validation 
 
   // The listing names the models and fallback that new conversations use.
   await publish(b,single(key,{fallback}));
-  assert.deepEqual((await owner.request(path)).data.selected,{version:2,mode:'connected',agents:[{agent:'answer',model:'deepseek/deepseek-flash',fallback:`qwen/${QWEN}`}]});
+  assert.deepEqual((await owner.request(path)).data.selected,{version:2,mode:'connected',agents:[{agent:'answer',model:'deepseek/deepseek-flash',fallback:`qwen/${QWEN}`}],decision:null});
   // A provider rejection that echoes the key reveals it nowhere.
   await publish(b,single(key));
   const marker=`private-customer-text-${crypto.randomUUID()}`;

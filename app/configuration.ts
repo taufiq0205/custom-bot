@@ -9,9 +9,12 @@ export const REF=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/, FIELD=/^[A-Za-z_][A-Za-z0
 const MAX_TEXT=262144;
 // PostgreSQL text/jsonb cannot store these.
 const unstorable=/\u0000|\p{Cs}/u;
+// A decision step routes on each declared choice, plus these two safe routes; no choice may take their names.
+const DECISION_ROUTES=['uncertain','failure'];
 // Outputs each step type must connect before publication.
 const outputs=(step:any):string[]=>{
-  const all:Record<string,string[]>={retrieval:['next'],condition:['yes','fallback'],http:['success','failure'],agent:step.final===true?['unsupported']:['next','unsupported'],handoff:[]};
+  const all:Record<string,string[]>={retrieval:['next'],condition:['yes','fallback'],http:['success','failure'],agent:step.final===true?['unsupported']:['next','unsupported'],handoff:[],
+    decision:[...(isObject(step.choices)?Object.keys(step.choices).filter(c=>!DECISION_ROUTES.includes(c)):[]),...DECISION_ROUTES]};
   return Object.hasOwn(all,step.type)?all[step.type]:[];
 };
 const pointer=(key:string)=>'/'+key.replace(/~/g,'~0').replace(/\//g,'~1');
@@ -144,7 +147,17 @@ export function validate(text:string) {
     condition:{field:text_(64,FIELD),equals:(v,p)=>{if(!['string','boolean'].includes(typeof v)&&!(typeof v==='number'&&Number.isFinite(v)))err(p,'Must be text, a number or true/false');}},
     http:{action:ref(actions,'action')},
     agent:{agent:ref(agents,'agent'),final:bool},
-    handoff:{}
+    handoff:{},
+    // A typed decision: the engine picks one declared choice, with a probability; only the route depends on it.
+    decision:{question:text_(2000),min_probability:number(0,1),choices:(v,p)=>{
+      if(!isObject(v))return err(p,'Must be an object of choice names and descriptions');
+      const names=Object.keys(v);
+      if(names.length<2||names.length>20)err(p,'Needs 2–20 choices');
+      for(const name of names) {
+        if(!FIELD.test(name)||DECISION_ROUTES.includes(name))err(p+pointer(name),`Choice names must match ${FIELD} and cannot be ${DECISION_ROUTES.map(r=>`"${r}"`).join(' or ')}`);
+        text_(500)(v[name],p+pointer(name));
+      }
+    }}
   };
   const step:Check=(v,p)=>{
     if(!isObject(v))return err(p,'Must be an object');
@@ -180,6 +193,7 @@ export function validate(text:string) {
   const workflow=doc?.workflow;
   if(isObject(workflow)&&Array.isArray(workflow.steps)) {
     if(workflow.entry===null)blockers.push({path:'/workflow/entry',message:'Choose a start step'});
+    if(!Object.hasOwn(doc,'decision')&&workflow.steps.some((s:any)=>s?.type==='decision'))blockers.push({path:'/decision',message:'Select a decision engine for the decision steps'});
     workflow.steps.forEach((s:any,i:number)=>{
       if(!isObject(s)||steps.get(s.id)!==s)return;
       for(const output of outputs(s)) {
