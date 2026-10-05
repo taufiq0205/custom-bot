@@ -30,7 +30,7 @@ Repeat seed commands leave existing Businesses/Memberships unchanged. Seeds neve
 
 Owners select **Manage** beside their Business to invite a verified Operator as Owner or Support, change a current Member's role, revoke access, or cancel a pending invitation. Invitation tokens arrive only at the intended email; the recipient signs in with that verified account and pastes the token into **Accept invitation**. Invitations expire after seven days, are single-use, and are superseded by a new invitation to the same email. Existing active Memberships cannot be overwritten through invitation acceptance. Revocation cancels pending invitations to that Member; demotion/revocation also cancels grants issued by that Owner. A fresh authorized invitation can restore revoked access. Every privileged request rechecks the current Business Membership; authority in another Business cannot grant access. Revocation does not require account sign-out. Concurrent changes preserve at least one active Owner.
 
-Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration and action-control APIs are Owner-only (below); trace APIs remain a later slice and return 404 for all roles.
+Membership APIs: `GET /api/businesses/:id/memberships`; `POST /api/businesses/:id/memberships/:operatorId` with exactly `{ "role": "Owner" | "Support", "active": boolean, "revision": "expected revision" }`; `GET/POST /api/businesses/:id/invitations` (creation accepts exactly `email` and `role`); `POST /api/businesses/:id/invitations/:invitationId` with `{}` cancels; `POST /api/invitations/accept` with exactly `token`. Owner-only access failures and foreign references return 404; stale revisions and last-Owner changes return 409. Public invitation lists omit token/verifier values. Configuration, action-control, preview and trace APIs are Owner-only (below).
 
 ## Configuration (JSON)
 
@@ -178,6 +178,38 @@ A `decision` step asks Jev (TypeSafe) one typed question about the current Custo
 - **Records.** Each attempt is recorded and logged value-free, like generation: target `jev/<model>`, operation `decision`, status and reason, the served model (`jev-1.13.0`), input/output tokens, and a cost estimate from `PROVIDER_RATES` (Jev charges input tokens only, for example `{"jev/jev-1.13.0":[0.042,0]}`). Readiness reports Jev's endpoint and key state, never the key.
 - **Simulation mode.** Decisions run in simulation mode too, like HTTP steps, under the same permission and key.
 
+## Preview chat and execution traces
+
+In **Configuration**, **▷ Preview chat** lets an Owner chat as an anonymous preview Customer:
+- **Pinned version.** Each New chat pins the latest *published* version, exactly like a website conversation; the draft never runs. Every reply shows its version and whether it ran in simulation or connected mode.
+- **Real execution.** Connected mode calls the real providers (with their cost) under the same permissions and checks.
+- **Never in the inbox.** Preview conversations are invisible to Support. One that reaches a handoff stays paused, so start a New chat.
+
+Under each reply is its **execution trace**:
+- **What it shows:** the steps the turn ran, in order, with type, status, route taken and timing. Each provider or HTTP attempt shows its target, status, reason, served model, tokens, cost estimate and whether it was the Qwen fallback.
+- **Safe references only:** evidence by source, document and page; decision choice and probability; lookup result and context field *names*; citations.
+- **Never shown:** prompts, messages, passage text, field values, inputs, Customer identities or secrets.
+- **Turn outcome:** it comes from the job, not from the last step. A step left unfinished by a worker stop shows as `interrupted`.
+
+**Recent conversations** in the same panel opens the trace of any recent Customer or preview conversation.
+
+Selecting a trace step only navigates; nothing in the draft changes:
+- **Canvas:** it selects the step's node.
+- **JSON view:** it selects the step's ID in the text. If the draft JSON is invalid, it finds the ID by text search and says so.
+- **Not in the draft:** a step that ran in an older version but is missing from the draft, or has another type there, is labelled that way and is not located.
+- **Version:** every status line names the version that actually ran.
+
+APIs (Owner of the Business only; Support, other Businesses and demoted Owners get `404`):
+- `POST /api/businesses/:id/preview` `{}`: `201 {conversation}`, pinned to the latest published version (`configuration_version`, `mode`).
+- `GET /api/businesses/:id/preview/:conversationId`: the preview conversation and its messages.
+- `POST /api/businesses/:id/preview/:conversationId/messages` `{ "client_submission_id", "text" }`: `202`. A retried submission returns the original (`200`); the same ID with other text gets `409`.
+- `GET /api/businesses/:id/traces`: the 50 most recent conversations with messages, each with `preview`, `configuration_version` and `mode`.
+- `GET /api/businesses/:id/traces/:conversationId`:
+  - the pinned `configuration_version`, `mode` and `published_at`;
+  - per turn, the job's `status` and `error`;
+  - its `steps`: `ordinal`, `step_id`, `type`, `status`, `output`, `error`, `detail`, and the start and finish times;
+  - its `attempts`, each linked to its step by `step_ordinal`.
+
 ## Knowledge (documents and websites)
 
 An Owner uploads documents under a source ID that the configuration's `sources` declare (**Manage → Knowledge**, or the API below). Support Members and other Businesses get `404`.
@@ -277,6 +309,6 @@ npm test
 docker compose up -d --wait --remove-orphans
 ```
 
-Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests, and a document (or a website's first page) starting `[hold Ns]` holds its activation the same way. The test overlay also starts a controlled HTTPS `fixture` service (answering as `api.deepseek.com`, `dashscope-intl.aliyuncs.com` and `api.typesafe.ai` on the test network only, plus a business endpoint; `tests/fixture/`, test-only self-signed CA and synthetic worker keys) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md) and [knowledge validation](docs/validation-21.md) and [provider validation](docs/validation-28.md) and [website knowledge validation](docs/validation-22.md) and [decision validation](docs/validation-29.md).
+Tests use the running Docker APIs, actual PostgreSQL, the real worker, local SMTP capture, independent clients for token-consumption and duplicate-submission races, and Chromium for onboarding/recovery and website chat (from a separate fixture website origin) at mobile width. `compose.test.yaml` shortens OTP expiry to eight seconds, invitation expiry to twenty seconds and worker job leases to five seconds only in test mode; in test mode only, a Customer message starting `[hold Ns]` holds its simulated step N seconds (max 30) for crash/late-result tests, and a document (or a website's first page) starting `[hold Ns]` holds its activation the same way. The test overlay also starts a controlled HTTPS `fixture` service (answering as `api.deepseek.com`, `dashscope-intl.aliyuncs.com` and `api.typesafe.ai` on the test network only, plus a business endpoint; `tests/fixture/`, test-only self-signed CA and synthetic worker keys) whose control port is `127.0.0.1:${FIXTURE_PORT:-3199}`. No test control route is exposed, and the app and worker refuse these controls outside test mode. The runtime and chat tests restart this Compose project's database/app/worker, kill the worker mid-turn, and temporarily stop the worker. Run against disposable local fixture data. Required test prerequisites and recorded evidence are in [slice 1 validation](docs/validation-13.md) [Membership validation](docs/validation-14.md) [website chat validation](docs/validation-15.md) and [verified Customer validation](docs/validation-16.md) and [configuration validation](docs/validation-17.md) and [inbox validation](docs/validation-18.md) and [workflow execution validation](docs/validation-19.md) and [action validation](docs/validation-20.md) and [knowledge validation](docs/validation-21.md) and [provider validation](docs/validation-28.md) and [website knowledge validation](docs/validation-22.md) and [decision validation](docs/validation-29.md) and [preview and trace validation](docs/validation-27.md).
 
 Hosted deployment is outside this ticket. Before hosting, require HTTPS ingress, real SMTP, secret management, backups/recovery, monitoring and remaining specification gates. `APP_MODE=hosted` rejects HTTP, mail-capture transport, test TTL controls and seeding. This local Compose path is not an approved production deployment.

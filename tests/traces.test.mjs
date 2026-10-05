@@ -47,15 +47,17 @@ async function preview(b) {
 test('browser: an Owner previews a version, follows its trace to the draft without changing it, and tells versions apart; Support sees none of it',async()=>{
   const b=await business('traces-browser',{owner});
   const key=`browser-${crypto.randomUUID()}`;
-  // Version 2 (simulation): a condition, then a final agent. The draft then drops the condition, so it is "not in draft".
-  const v2={...config({agents:[agent(`${key}.reply`)],steps:[{id:'route',type:'condition',field:'intent',equals:'human'},
-    {id:'reply',type:'agent',agent:'reply',final:true},handoff],links:[['route','yes','support'],['route','fallback','reply'],['reply','unsupported','support']]}),
+  // Version 2 (simulation): a condition, an intermediate agent, then a final agent. The draft drops the condition ("not in draft")
+  // and reuses the intermediate agent's ID for a handoff ("changed in draft").
+  const v2={...config({agents:[agent(`${key}.greet`),agent(`${key}.reply`)],steps:[{id:'route',type:'condition',field:'intent',equals:'human'},
+    {id:'greet',type:'agent',agent:'greet',final:false},{id:'reply',type:'agent',agent:'reply',final:true},handoff],
+    links:[['route','yes','support'],['route','fallback','greet'],['greet','next','reply'],['greet','unsupported','support'],['reply','unsupported','support']]}),
     generation:{mode:'simulation'}};
   await publish(b,v2);
   const draftDoc=structuredClone(v2);
   draftDoc.workflow.entry='reply';
-  draftDoc.workflow.steps=draftDoc.workflow.steps.filter(s=>s.id!=='route');
-  draftDoc.workflow.connections=draftDoc.workflow.connections.filter(c=>c.from!=='route');
+  draftDoc.workflow.steps=draftDoc.workflow.steps.filter(s=>s.id!=='route').map(s=>s.id==='greet'?{id:'greet',type:'handoff',position:s.position}:s);
+  draftDoc.workflow.connections=draftDoc.workflow.connections.filter(c=>!['route','greet'].includes(c.from));
   const path=`/api/businesses/${b.id}/configuration`,pretty=JSON.stringify(draftDoc,null,2);
   const saved=await owner.request(path,{text:pretty,revision:(await owner.request(path)).data.revision});
   assert.equal(saved.status,200);
@@ -80,17 +82,21 @@ test('browser: an Owner previews a version, follows its trace to the draft witho
     await panel.getByText('Simulation · version 2',{exact:true}).waitFor();
     await panel.getByLabel('Preview message').fill('Hello there');
     await panel.getByRole('button',{name:'Send',exact:true}).click();
-    await panel.getByText('Execution trace · version 2 · simulation · 2 steps · completed',{exact:true}).waitFor();
+    await panel.getByText('Execution trace · version 2 · simulation · 3 steps · completed',{exact:true}).waitFor();
     // Each reply names its pinned version and mode.
     await panel.locator('.msg.agent .msg-meta').filter({hasText:'Simulated assistant'}).getByText('Simulation · version 2').waitFor();
     const missing=panel.getByRole('button',{name:'Trace step 1: route (condition), not in draft'});
-    const present=panel.getByRole('button',{name:'Trace step 2: reply (agent), locate'});
-    await panel.getByText(/simulated: no AI model was called/).waitFor();
+    const changed=panel.getByRole('button',{name:'Trace step 2: greet (agent), changed in draft'});
+    const present=panel.getByRole('button',{name:'Trace step 3: reply (agent), locate'});
+    await panel.getByText(/simulated: no AI model was called/).first().waitFor();
     await present.click();
     await page.locator('[data-step-id="reply"].selected').waitFor();
     await page.getByText(/^Located reply on the canvas\. This turn ran published version 2, not the draft, whose settings may differ\. Configuration unchanged\.$/).waitFor();
     await missing.click();
     await page.getByText('Step route ran in version 2 but is not in the current draft. Configuration unchanged.',{exact:true}).waitFor();
+    await changed.click();
+    await page.getByText('Step greet ran in version 2 as a step of type agent; the current draft has another type under that ID. Configuration unchanged.',{exact:true}).waitFor();
+    assert.equal(await page.locator('.workflow-node.selected').getAttribute('data-step-id'),'reply');
     await unchanged(pretty);
     // JSON view: the step's ID is selected in the text (in the steps, not the agent with the same ID).
     await page.getByRole('button',{name:'JSON',exact:true}).click();

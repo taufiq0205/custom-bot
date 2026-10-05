@@ -294,7 +294,7 @@ const tags={same:'locate',changed:'changed in draft',absent:'not in draft',inval
 function locateStep(step,trace) {
   const v=trace.configuration_version,state=window.workflowEditor.step(step.step_id,step.type);
   if(state==='absent')return status_(`Step ${step.step_id} ran in version ${v} but is not in the current draft. Configuration unchanged.`);
-  if(state==='changed')return status_(`Step ${step.step_id} ran in version ${v} as a ${step.type} step; the current draft has a different step with that ID. Configuration unchanged.`);
+  if(state==='changed')return status_(`Step ${step.step_id} ran in version ${v} as a step of type ${step.type}; the current draft has another type under that ID. Configuration unchanged.`);
   const where=window.workflowEditor.locate(step.step_id);
   if(!where)return status_(`Step ${step.step_id} (version ${v}) was not found in the draft text. Configuration unchanged.`);
   status_(`Located ${step.step_id} ${where==='node'?'on the canvas':'in the draft JSON'}${state==='invalid'?' by text search, because the draft JSON is invalid':''}. `+
