@@ -1,0 +1,7 @@
+{
+ "business": "Northwind Kettles",
+ "host": "northwind.demo.test",
+ "shop": "http://localhost:3300",
+ "orders_key": "northwind-demo-orders-key-synthetic-0001",
+ "customer": "demo-customer-ada"
+}

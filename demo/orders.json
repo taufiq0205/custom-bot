@@ -1,0 +1,5 @@
+[
+ {"order_id": "NK-1001", "customer_id": "demo-customer-ada", "item": "Aurora Glass Kettle", "status": "shipped", "estimated_delivery": "in 2 business days"},
+ {"order_id": "NK-1002", "customer_id": "demo-customer-ada", "item": "Limescale filter (2-pack)", "status": "processing", "estimated_delivery": "in 4 business days"},
+ {"order_id": "NK-2001", "customer_id": "demo-customer-ben", "item": "Copper Whistle Kettle", "status": "delivered", "estimated_delivery": "delivered"}
+]

@@ -283,7 +283,7 @@ function stepRows(step,attempts) {
   const ref=e=>`${e.source} · ${e.document}${e.page!=null&&e.page!==e.document?` · ${e.page}`:''}`;
   if(d.agent)rows.push(`agent ${d.agent}`);
   if(d.simulated)rows.push('simulated: no AI model was called');
-  if(d.choice)rows.push(`choice ${d.choice} · probability ${d.probability}`);
+  if(d.choice)rows.push(d.simulated?`choice ${d.choice} (keyword match)`:`choice ${d.choice} · probability ${d.probability}`);
   if(d.reason)rows.push(`failure route: ${d.reason}`);
   if(d.evidence)rows.push(d.evidence.length?`evidence: ${d.evidence.map(ref).join('; ')}`:'evidence: none found');
   if(d.citations?.length)rows.push(`cited: ${d.citations.map(ref).join('; ')}`);

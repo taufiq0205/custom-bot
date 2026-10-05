@@ -69,18 +69,38 @@ services:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       PROVIDER_RATES: ${PROVIDER_RATES:-}
+      # Portfolio demo only (local mode): DEMO_PUBLIC_HOSTS=northwind.demo.test lets exactly that host resolve to the private
+      # network, trusted only through the local-only demo CA. Hosted mode refuses both.
+      DEMO_PUBLIC_HOSTS: ${DEMO_PUBLIC_HOSTS:-}
+      DEMO_CA_FILE: ${DEMO_PUBLIC_HOSTS:+/demo/cert.pem}
     depends_on:
       migrate: {condition: service_completed_successfully}
       models: {condition: service_completed_successfully, required: false}
     # The internal network has no outbound access: embedding runs only from the verified cache, if installed.
     # Connected generation needs outbound HTTPS: add compose.connected.yaml (see README, Providers).
-    volumes: [models:/models:ro]
+    volumes: [models:/models:ro, ./demo/cert.pem:/demo/cert.pem:ro]
     networks: [internal]
     healthcheck:
       test: [CMD, python, -c, "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL']); assert c.execute(\"SELECT 1 FROM worker_health WHERE id='worker' AND heartbeat>now()-interval '10 seconds'\").fetchone()"]
       interval: 5s
       timeout: 5s
       retries: 20
+  # Portfolio demo (README, Portfolio demo): Northwind Kettles, a fictional business with synthetic data. Its HTTPS order API and
+  # help site answer only on the private network as northwind.demo.test; its shop page is on 127.0.0.1:3300.
+  demo:
+    profiles: [demo]
+    build: .
+    command: [node, /demo/server.mjs]
+    environment:
+      APP_URL: ${APP_URL:-http://localhost:3100}
+    volumes: [./demo:/demo:ro]
+    # Port 443 as the image's unprivileged user.
+    sysctls: {net.ipv4.ip_unprivileged_port_start: 0}
+    ports: [127.0.0.1:3300:3300]
+    networks:
+      internal: {aliases: [northwind.demo.test]}
+      web: {}
+  # Seeds the demo Business through the app's own APIs, signed in as SEED_OWNER_EMAIL; add --connected for real providers.
   seed:
     profiles: [seed]
     build: .
@@ -88,8 +108,11 @@ services:
     environment:
       <<: *app-env
       SEED_OWNER_EMAIL: ${SEED_OWNER_EMAIL:-}
+      SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD:-}
+      SEED_SUPPORT_PASSWORD: ${SEED_SUPPORT_PASSWORD:-}
+    volumes: [./demo:/demo:ro]
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      app: {condition: service_healthy}
     networks: [internal]
 networks:
   internal: {internal: true}

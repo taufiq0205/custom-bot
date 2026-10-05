@@ -25,9 +25,15 @@ services:
       ACTION_CREDENTIAL_KEY: 7e57000000000000000000000000000000000000000000000000000000007e57
       # Only these exact fixture names may resolve to the private Docker network; internal.fixture.test (same server) may not.
       TEST_PUBLIC_HOSTS: orders.fixture.test,other.fixture.test,site.fixture.test,api.deepseek.com,dashscope-intl.aliyuncs.com,api.typesafe.ai
+      # The bundled demo service, exactly as a local demo enables it.
+      DEMO_PUBLIC_HOSTS: northwind.demo.test
+      DEMO_CA_FILE: /demo/cert.pem
     volumes: [./tests/fixture/cert.pem:/fixture/cert.pem:ro]
     # Approved-looking names that resolve to loopback, cloud-metadata link-local and private addresses.
     extra_hosts: ['loopback.fixture.test:127.0.0.1', 'metadata.fixture.test:169.254.169.254', 'private.fixture.test:10.255.255.1']
+  # Tests drive the real demo service.
+  demo:
+    profiles: !reset []
   fixture:
     image: python:3.14.6-slim-bookworm@sha256:4c92ffcde4dd6f1ff72a24518f49fd4990b27134987dfa31a733badde66df9f8
     command: [python, -u, /fixture/server.py]

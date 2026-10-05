@@ -24,13 +24,15 @@ createServer(async (req,res) => {
   try {
     if (path === '/health/ready' && req.method === 'GET') {
       try {
-        const worker = await pool.query("SELECT knowledge,generation FROM worker_health WHERE id='worker' AND heartbeat > now()-interval '10 seconds'");
+        const worker = await pool.query("SELECT knowledge,generation,demo FROM worker_health WHERE id='worker' AND heartbeat > now()-interval '10 seconds'");
         if (!worker.rowCount) return json(503,{error:'Worker unavailable; inspect worker service logs'});
         await pool.query('SELECT 1 FROM businesses LIMIT 1');
         await mail.verify();
         return json(200,{status:'ready', app:'ok', database:'ok', worker:'ok', mail:'ok', knowledge:worker.rows[0].knowledge,
           // Provider keys live only in the worker; it reports their presence and endpoints, never values or unmeasured access.
-          generation:{simulation:'always available, labelled as simulated', ...worker.rows[0].generation}});
+          generation:{simulation:'always available, labelled as simulated', ...worker.rows[0].generation},
+          // The bundled portfolio demo service, when the worker has it enabled (local only).
+          ...(worker.rows[0].demo?{demo:worker.rows[0].demo}:{})});
       } catch {return json(503,{error:'Database/migrations or mail unavailable; inspect db, migrate and mail services'});}
     }
     // Website chat enforces each Business's approved origins instead of the Operator app origin.
