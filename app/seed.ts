@@ -18,7 +18,7 @@ const demo = JSON.parse(await readFile('/demo/demo.json', 'utf8'));
 const {kid, kty, crv, x, y} = JSON.parse(await readFile('/demo/customer-key.json', 'utf8'));
 const api = 'http://app:3000', mail = 'http://mail:8025';
 const report = (created: boolean, what: string) => console.log(`${created ? 'Created' : 'Already exists'}: ${what}`);
-type Reply = {status: number, data: any};
+type Reply = {status: number, data: any, retry?: number};
 
 // One Operator's API session: same-origin requests carrying its own Better Auth cookie.
 function session() {
@@ -31,8 +31,15 @@ function session() {
       const [name, value] = set.split(';')[0].split(/=(.*)/s);
       if (value) cookies.set(name, value); else cookies.delete(name);
     }
-    return {status: response.status, data: await response.json().catch(() => null)};
+    return {status: response.status, data: await response.json().catch(() => null), retry: Number(response.headers.get('x-retry-after'))};
   };
+}
+// Sign-in and sign-up are rate limited: wait out one 429 (at most a minute) instead of failing a quick rerun.
+async function limited(send: () => Promise<Reply>) {
+  const first = await send();
+  if (first.status !== 429) return first;
+  await new Promise(r => setTimeout(r, 1000 * (first.retry! >= 1 && first.retry! <= 60 ? first.retry! : 60) + 100));
+  return send();
 }
 function expect(reply: Reply, statuses: number[], what: string) {
   if (!statuses.includes(reply.status)) throw new Error(`${what} failed (${reply.status}): ${reply.data?.error ?? JSON.stringify(reply.data)}`);
@@ -52,11 +59,11 @@ async function captured(email: string, subject: string, since: number) {
 }
 async function signIn(account: {email: string, password: string}, create: boolean) {
   const request = session();
-  const attempt = () => request('/api/auth/sign-in/email', account);
+  const attempt = () => limited(() => request('/api/auth/sign-in/email', account));
   let login = await attempt();
   if (login.status === 401 && create) {
     const since = Date.now();
-    expect(await request('/api/auth/sign-up/email', {name: 'Northwind Support (demo)', ...account}), [200], `Sign-up of ${account.email}`);
+    expect(await limited(() => request('/api/auth/sign-up/email', {name: 'Northwind Support (demo)', ...account})), [200], `Sign-up of ${account.email}`);
     const code = (await captured(account.email, 'email-verification', since)).match(/\b\d{8}\b/)![0];
     expect(await request('/api/auth/email-otp/verify-email', {email: account.email, otp: code}), [200], `Verification of ${account.email}`);
     report(true, `Support Operator ${account.email}`);

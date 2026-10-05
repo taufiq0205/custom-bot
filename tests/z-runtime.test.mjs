@@ -28,7 +28,7 @@ test('tokens: independent concurrent consumers and expiry',async()=>{
  assert.equal((await limited(()=>expired.request('/api/auth/email-otp/reset-password',{email:expired.email,otp:expiredReset,password:'Expired-password-928!'}))).status,400);
  assert.equal((await limited(()=>expired.request('/api/auth/sign-in/email',{email:expired.email,password:expired.password}))).status,403);
 });
-test('Docker: restart persistence, private services, guarded migrations, seed idempotency and readiness failure',async()=>{
+test('Docker: restart persistence, private services, guarded migrations, hosted seed refusal and readiness failure',async()=>{
  const {request,email,password}=await account('durable');
  const code=await otp(email,'email-verification');
  assert.equal((await limited(()=>request('/api/auth/email-otp/verify-email',{email,otp:code}))).status,200);
@@ -52,20 +52,7 @@ test('Docker: restart persistence, private services, guarded migrations, seed id
  writeFileSync(join(changed,'001-auth.sql'),readFileSync('migrations/001-auth.sql','utf8')+'\n-- changed applied migration\n');
  assert.throws(()=>compose('run','--rm','-v',`${changed}:/app/migrations:ro`,'migrate'),e=>e.stderr.includes('Applied migration changed'));
  assert.equal((await request('/health/ready')).status,200);
- const seedEmail='seed-slice-13@example.test', seedPassword='Seed-fixture-password-938!';
- const seedRequest=await client();
- let seedLogin=await seedRequest('/api/auth/sign-in/email',{email:seedEmail,password:seedPassword});
- if(seedLogin.status===401){
-  assert.equal((await seedRequest('/api/auth/sign-up/email',{name:'Seed Operator',email:seedEmail,password:seedPassword})).status,200);
-  assert.equal((await seedRequest('/api/auth/email-otp/verify-email',{email:seedEmail,otp:await otp(seedEmail,'email-verification')})).status,200);
-  seedLogin=await seedRequest('/api/auth/sign-in/email',{email:seedEmail,password:seedPassword});
- }
- assert.equal(seedLogin.status,200);
- await Promise.all([concurrentCompose('run','--rm','-e',`SEED_OWNER_EMAIL=${seedEmail}`,'seed'),concurrentCompose('run','--rm','-e',`SEED_OWNER_EMAIL=${seedEmail}`,'seed')]);
- const first=(await seedRequest('/api/businesses')).data;
- assert.deepEqual(first.map(b=>b.name).sort(),['Harbor Demo','Northstar Demo']);
- compose('run','--rm','-e',`SEED_OWNER_EMAIL=${seedEmail}`,'seed');
- assert.deepEqual((await seedRequest('/api/businesses')).data,first);
+ // Demo seed idempotency and refusals: tests/demo.test.mjs.
  assert.deepEqual((await login('/api/businesses')).data,before);
  assert.equal((await login('/api/businesses/'+created.data.id)).data.name,'Preserved Business');
  assert.throws(()=>compose('run','--rm','-e','APP_MODE=hosted','-e','APP_URL=https://example.test','-e','SMTP_HOST=smtp.example.test','-e',`SEED_OWNER_EMAIL=${email}`,'seed'));
