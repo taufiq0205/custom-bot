@@ -29,7 +29,7 @@ Environment (2026-10-05): macOS 27.0.1 arm64 with OrbStack (Docker Engine 29.4.0
 npm ci --ignore-scripts
 npm run typecheck
 docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait
-node --test --test-concurrency=1 tests/traces.test.mjs   # 5 tests, about 15 seconds
+node --test --test-concurrency=1 tests/traces.test.mjs   # 6 tests, about 20 seconds
 caffeinate -i npm test
 docker compose up -d --wait --remove-orphans                # leave test mode
 ```
@@ -43,14 +43,35 @@ docker compose up -d --wait --remove-orphans                # leave test mode
 | Support and other Businesses are denied through both API and UI | **Access** test: Support and another Business's Owner get `404` on all five routes. Cross-Business conversation IDs get `404` both ways, and nothing is queued. A Customer conversation's trace is `404` for Support and `200` for the Owner. Signed out: `401`; foreign or missing Origin on POST: `403`. An Owner demoted to Support gets `404` on the next request of the same session. **Browser**: Support sees the Business without Manage and no Preview chat. |
 | Selecting a trace step locates its node or JSON section without changing any draft value or revision | **Browser** journey with a pretty-printed saved draft:<br>• canvas: "locate" selects the `reply` node;<br>• JSON view: the selection is exactly `"id": "reply"`, after `"steps"` (an agent has the same ID);<br>• after each click the server revision and text are unchanged, the editor text is byte-identical, and no unsaved-edits dialog appears. |
 | Older-version missing nodes and invalid current JSON are handled explicitly | **Browser**:<br>• `route` (dropped from the draft) is tagged "not in draft" and its status names version 2;<br>• `greet` (an agent in version 2, a handoff in the draft) is "changed in draft" and is not located; the selection stays on `reply`;<br>• with invalid draft JSON saved and reloaded, locate says "by text search, because the draft JSON is invalid" and the text and revision are unchanged;<br>• after version 3 is published, the version 2 conversation says "Version 3 is published now; New chat uses it". |
-| Browser journeys verify navigation, version distinction and draft immutability | The **browser** journey above, at 1440 px and then 390 px (no horizontal overflow), with no page errors. |
+| Browser journeys verify navigation, version distinction and draft immutability | The **browser** journey above, at 1440 px and then 390 px (no horizontal overflow), with no page errors. Another Business's Owner, signed in to the same app, does not see the Business listed at all. |
+| Races (testing gate: independent clients and barriers) | **Races** test, using independent sockets released together by one barrier:<br>• A publication and a preview creation: both return `201`. The preview reports exactly one version with that version's mode, and its first turn runs exactly that version's steps. Across 12 executions of this race (repeated runs during development), both orderings occurred: 1 preview pinned version 1 and 11 pinned version 2.<br>• A co-Owner's demotion against their preview message and preview creation: each request is wholly before or after it (`202`/`201`, or `404`). A message exists only when its request got `202`, and afterwards trace and preview are `404`. |
 
 Also in the **preview** test:
 - inbox list, detail, claim and memory exclude the preview;
 - a retried submission returns the original message (`202`, then `200` with the same ID), and the same ID with other text gets `409`;
 - a preview that reaches a handoff waits for support, stays out of the inbox, and the UI offers New chat.
 
-Full suite (2026-10-05): `npm run typecheck` clean. `caffeinate -i npm test` ran **103 tests: 102 passed, 1 failed** (26.3 minutes). The failure was the browser journey, which I had edited during the run; it ran against images built before its UI wording change. After rebuilding, `tests/traces.test.mjs` passed **5 of 5**.
+Full suite (2026-10-05): `npm run typecheck` clean. A first `caffeinate -i npm test` ran 103 tests with 1 failure: the browser journey, edited during that run, ran against images built before its UI change. **On the final commit `398b55f`**, after the code review fixes: **104 tests, 104 passed, 0 failed** (28.0 minutes).
+
+## Code review
+
+`/code-review` (standards and spec) on the branch. Fixed:
+- The 1-second trace poll reopened a panel the Owner had closed.
+- The "other attempts" row showed `unfinished`.
+- A step that ended in an unexpected error saved no reason. It now says `unexpected worker error`.
+- A failed final write of a step record could mask the original exception. Now the record stays `started` and reads as `interrupted`.
+- The agent ID was recorded but never shown.
+- Small renames and one shared panel-open helper.
+
+The spec review asked for this evidence, now added:
+- the race test;
+- the other-Business UI check;
+- a full-suite run on the final commit.
+
+Known limits, kept on purpose:
+- Step records are written without the turn's authority check, so a turn that lost its lease still records what it ran. They are value-free, and the job's outcome shows nothing of it was delivered.
+- An agent retried without memory after delivery found memory unavailable runs outside the step loop. Its attempts are attached to the final step's ordinal.
+- Error and reason strings are the worker's own value-free reasons, never provider or business response bodies. This holds by construction, not by a filter.
 
 ## Mutation checks
 
