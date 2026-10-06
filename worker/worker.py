@@ -32,6 +32,16 @@ if KEY and not re.fullmatch(r'[0-9a-fA-F]{64}', KEY):
 CIPHER = AESGCM(bytes.fromhex(KEY)) if KEY else None
 # Test only: these exact fixture hostnames may resolve to the Docker network's private addresses. Every other check still applies.
 PUBLIC_HOSTS = set(filter(None, os.environ.get('TEST_PUBLIC_HOSTS', '').split(',')))
+# Portfolio demo only: the bundled demo service's one fixed name may resolve to the private network, and only its local-only demo CA
+# verifies it (that CA verifies nothing else). Every other check still applies. Hosted mode refuses both settings.
+DEMO_HOST = 'northwind.demo.test'
+DEMO_HOSTS, DEMO_CA = os.environ.get('DEMO_PUBLIC_HOSTS', ''), os.environ.get('DEMO_CA_FILE', '')
+if (DEMO_HOSTS or DEMO_CA) and MODE == 'hosted':
+    sys.exit('The demo service settings (DEMO_PUBLIC_HOSTS, DEMO_CA_FILE) are local-only')
+if (DEMO_HOSTS or DEMO_CA) and (DEMO_HOSTS != DEMO_HOST or not DEMO_CA):
+    sys.exit(f'DEMO_PUBLIC_HOSTS must be exactly {DEMO_HOST}, with DEMO_CA_FILE')
+PUBLIC_HOSTS |= {DEMO_HOST} if DEMO_HOSTS else set()
+DEMO = f'{DEMO_HOST}: demo service, not a real business' if DEMO_HOSTS else None
 # The lease covers the claim and each bounded external call, never past the 60-second deadline.
 LEASE = int(os.environ.get('TEST_JOB_LEASE_SECONDS', '60'))
 if not 1 <= LEASE <= 60:
@@ -62,6 +72,7 @@ if not (isinstance(RATES, dict) and all(isinstance(v, list) and len(v) == 2 and 
                                         for v in RATES.values())):
     sys.exit('PROVIDER_RATES must be JSON like {"deepseek/deepseek-flash": [0.27, 1.1]} (USD per million input/output tokens)')
 TLS = ssl.create_default_context(cafile=os.environ.get('TEST_CA_FILE'))
+DEMO_TLS = ssl.create_default_context(cafile=DEMO_CA) if DEMO_CA else None
 # (served model, prompt tokens, completion tokens, cost estimate) of an attempt without a usable response.
 UNMEASURED = (None, None, None, None)
 DATABASE = os.environ['DATABASE_URL']
@@ -101,9 +112,9 @@ def heartbeat():
             with psycopg.connect(DATABASE, autocommit=True) as connection:
                 while True:
                     if time.monotonic() < alive_until:
-                        connection.execute("INSERT INTO worker_health(id,heartbeat,knowledge,generation) VALUES('worker',now(),%s,%s::jsonb) "
-                                           "ON CONFLICT(id) DO UPDATE SET heartbeat=now(),knowledge=EXCLUDED.knowledge,generation=EXCLUDED.generation",
-                                           (KNOWLEDGE, json.dumps(GENERATION)))
+                        connection.execute("INSERT INTO worker_health(id,heartbeat,knowledge,generation,demo) VALUES('worker',now(),%s,%s::jsonb,%s) "
+                                           "ON CONFLICT(id) DO UPDATE SET heartbeat=now(),knowledge=EXCLUDED.knowledge,generation=EXCLUDED.generation,demo=EXCLUDED.demo",
+                                           (KNOWLEDGE, json.dumps(GENERATION), DEMO))
                     time.sleep(2)
         except psycopg.Error:
             print('Worker waiting for migrations/database; check migrate and db services', flush=True)
@@ -632,6 +643,11 @@ class Turn:
         """One typed decision by the selected engine; only its validated choice name is used, to pick the next connection: a
         probable enough choice takes its own route, a less probable one the uncertain route, and any failure the failure route.
         Nothing the engine returns reaches the context, a prompt or the Customer, or authorizes anything."""
+        if self.document['generation']['mode'] == 'simulation':
+            # No engine is called in simulation; the trace labels the keyword route as simulated.
+            route, choice = keyword_route(self.message, step['choices'])
+            self.detail.update(simulated=True, choice=choice)
+            return route
         selected = self.document['decision']
         engine = selected['engine']
         target = f"{engine}/{selected.get('model') or ('jev-latest' if engine == 'jev' else 'default')}"
@@ -831,6 +847,23 @@ def decision_route(data, choices, threshold):
     return choice if probabilities[choice] >= threshold else 'uncertain', choice, probabilities[choice]
 
 
+STOPWORDS = {'what', 'when', 'where', 'which', 'your', 'with', 'that', 'this', 'have', 'about', 'from', 'does', 'will', 'would',
+             'could', 'there', 'their', 'they', 'please', 'want', 'know', 'tell', 'other', 'anything', 'else'}
+
+
+def keyword_route(message, choices):
+    """Simulation only, no model: the choice whose description shares the most words with the message, else 'uncertain' (no shared
+    word, or a tie). Returns the route and the matched choice (None when uncertain).
+    ponytail: bag of words with a crude plural strip; connected mode routes with Jev."""
+    def words(text):
+        return {w.rstrip('s') for w in re.findall(r'[a-z]{4,}', text.lower())} - {w.rstrip('s') for w in STOPWORDS}
+    said = words(message)
+    scores = sorted(((len(said & words(text)), name) for name, text in choices.items()), reverse=True)
+    if not scores[0][0] or scores[0][0] == scores[1][0]:
+        return 'uncertain', None
+    return scores[0][1], scores[0][1]
+
+
 def refusal_type(response):
     """A TypeSafe refusal's machine-readable error type ({"detail":{"error_type":"max_tokens_exceeded"}}), else nothing; never
     its message."""
@@ -953,7 +986,7 @@ class Pinned(http.client.HTTPSConnection):
 def request(method, url, body, deadline, headers=None, page=False):
     """The response text; a page request instead returns (status, location, content type, bytes) for any status but 429/5xx."""
     parts = urlsplit(url)
-    port, options = parts.port or 443, {'timeout': deadline - time.monotonic(), 'context': TLS}
+    port, options = parts.port or 443, {'timeout': deadline - time.monotonic(), 'context': DEMO_TLS if DEMO_TLS and parts.hostname == DEMO_HOST else TLS}
     connection = (Pinned(parts.hostname, port, vetted(parts.hostname, port), **options) if headers is not None
                   else http.client.HTTPSConnection(parts.hostname, port, **options))
     try:
