@@ -120,7 +120,7 @@ A rerun creates only what is missing and prints `Already exists:` for the rest. 
 
 ## Portfolio evaluation (issue #36)
 
-The frozen 30-case Northwind suite is shown in the [review table](evaluation/portfolio-v1/corpus-review.md); the folder also contains a [corpus approval template](evaluation/portfolio-v1/corpus-approval.template.json) and [human review checklist](evaluation/portfolio-v1/HUMAN-REVIEW.md). The latest local fixture report is [Markdown](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe.md) and [JSON](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe.json), with a [SHA-256 sidecar](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe.json.sha256).
+The frozen 30-case Northwind suite is shown in the [review table](evaluation/portfolio-v1/corpus-review.md); the folder also contains a [corpus approval template](evaluation/portfolio-v1/corpus-approval.template.json) and [human review checklist](evaluation/portfolio-v1/HUMAN-REVIEW.md). The latest local fixture report is [Markdown](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.md) and [JSON](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json), with a [SHA-256 sidecar](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json.sha256).
 
 | Latest run | Result |
 | --- | --- |

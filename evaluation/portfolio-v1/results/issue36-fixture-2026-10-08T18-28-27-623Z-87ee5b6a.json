@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "runId": "issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe",
+  "runId": "issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a",
   "mode": "fixture",
   "status": "pending-review",
-  "createdAt": "2026-10-08T16:35:57.105Z",
+  "createdAt": "2026-10-08T18:28:56.566Z",
   "corpus": {
     "suite": "northwind-kettles-portfolio",
     "version": "1.0.0",
@@ -21,8 +21,8 @@
   },
   "corpusApprovalRecord": null,
   "runtime": {
-    "gitCommit": "ae20391db723872b394aec4fd2cd67a0e2e8e7ba",
-    "configurationVersion": 29,
+    "gitCommit": "91c421304aaaac19fbc283eb9df4a17dc7ae2078",
+    "configurationVersion": 69,
     "configurationSha256": "cf0dddcdf453188715a2138d442364c87ef30cc117b05cdfafbc09548ed05d06",
     "judgePromptSha256": "a495194948edd96bba2fec20b6e5a5b99ff2278181150fd24ad7fa9fd787caf9",
     "providerAvailability": {
@@ -38,8 +38,12 @@
       "embedding": "available: BAAI/bge-small-en-v1.5@5c38ec7 on CPU"
     },
     "command": "node --env-file=.env evaluation/portfolio-v1/run.mjs --fixture",
-    "startedAt": "2026-10-08T16:35:36.194Z",
-    "finishedAt": "2026-10-08T16:35:57.078Z",
+    "judgeConfiguration": {
+      "version": 70,
+      "sha256": "1071d88210679d2ec8b99fd59c6b63172a5b6f21c73b5be66e2311f2e42ebd65"
+    },
+    "startedAt": "2026-10-08T18:28:27.624Z",
+    "finishedAt": "2026-10-08T18:28:56.547Z",
     "embeddingRevision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
     "models": {
       "application": {
@@ -95,7 +99,7 @@
     },
     "workingTree": {
       "dirty": true,
-      "sourceTreeSha256": "554709ad465801cec7563281fa24190ba6e00e80e54b0edfbe350bc64a6ef6fc"
+      "sourceTreeSha256": "3a1e2a0044ff034d0591e81aa5cd4d98725414d452089a74c293f5724d7242a0"
     },
     "cleanup": {
       "status": "pass",
@@ -104,7 +108,12 @@
         {
           "name": "baseline configuration republished",
           "status": "pass",
-          "version": 30
+          "version": 71
+        },
+        {
+          "name": "configuration draft restored",
+          "status": "pass",
+          "httpStatus": 200
         },
         {
           "name": "demo memory reset",
@@ -178,12 +187,12 @@
       "id": "warm-p95-latency-at-most-20-seconds",
       "status": "pending",
       "samples": 22,
-      "p95Ms": 525
+      "p95Ms": 521
     },
     {
       "id": "full-run-cost-at-most-1-usd-including-judge-and-extraction",
       "status": "pending",
-      "estimateUsdUpperBound": 0.016434
+      "estimateUsdUpperBound": 0.026094
     },
     {
       "id": "run-completed-and-cleaned-up",
@@ -228,6 +237,7 @@
       "unlabelled": 1,
       "noAnswerCases": 2,
       "noAnswerHandoffs": 2,
+      "noAnswerAbstentions": 0,
       "meanRecall": 1,
       "meanPrecision": 0.1,
       "top3PerSource": {
@@ -277,11 +287,11 @@
     "latency": {
       "completedReplies": 23,
       "cold": [
-        263
+        269
       ],
       "warmSamples": 22,
-      "warmP50Ms": 516,
-      "warmP95Ms": 525
+      "warmP50Ms": 517,
+      "warmP95Ms": 521
     },
     "llmJudge": {
       "judgedCases": 0,
@@ -303,7 +313,7 @@
         "inputTokens": 11280,
         "outputTokens": 1680,
         "unknownUsageRequests": 0,
-        "meanLatencyMs": 49,
+        "meanLatencyMs": 50,
         "reportedCostUsd": 0.0004737,
         "estimatedUpperBoundUsd": 0.00047376,
         "currency": "USD"
@@ -327,6 +337,24 @@
         "currency": "USD"
       },
       {
+        "provider": "deepseek/deepseek-flash",
+        "operation": "judge",
+        "route": "primary",
+        "requests": 30,
+        "connectedRequests": 0,
+        "unverifiedRequests": 30,
+        "successfulRequests": 30,
+        "failedRequests": 0,
+        "cases": 30,
+        "inputTokens": 30000,
+        "outputTokens": 3000,
+        "unknownUsageRequests": 0,
+        "meanLatencyMs": 50,
+        "reportedCostUsd": 0.021,
+        "estimatedUpperBoundUsd": 0.0126,
+        "currency": "USD"
+      },
+      {
         "provider": "my_orders",
         "operation": "http",
         "route": "provider",
@@ -339,7 +367,7 @@
         "inputTokens": 0,
         "outputTokens": 0,
         "unknownUsageRequests": 0,
-        "meanLatencyMs": 8,
+        "meanLatencyMs": 9,
         "reportedCostUsd": null,
         "estimatedUpperBoundUsd": 0,
         "currency": null
@@ -348,22 +376,22 @@
         "provider": "deepseek/deepseek-flash",
         "operation": "extraction",
         "route": "primary",
-        "requests": 14,
+        "requests": 7,
         "connectedRequests": 0,
-        "unverifiedRequests": 14,
-        "successfulRequests": 14,
+        "unverifiedRequests": 7,
+        "successfulRequests": 7,
         "failedRequests": 0,
         "cases": 7,
-        "inputTokens": 14000,
-        "outputTokens": 1400,
+        "inputTokens": 7000,
+        "outputTokens": 700,
         "unknownUsageRequests": 0,
-        "meanLatencyMs": 47,
-        "reportedCostUsd": 0.0098,
-        "estimatedUpperBoundUsd": 0.00588,
+        "meanLatencyMs": 50,
+        "reportedCostUsd": 0.0049,
+        "estimatedUpperBoundUsd": 0.00294,
         "currency": "USD"
       }
     ],
-    "estimatedUpperBoundUsd": 0.016434,
+    "estimatedUpperBoundUsd": 0.026094,
     "connectedProviderEvidence": {
       "complete": false,
       "recordedRequests": 0,
@@ -377,8 +405,8 @@
     }
   },
   "reviewBinding": {
-    "runId": "issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe",
-    "caseResultsSha256": "ffacb1b71ca7971946ed1277d254d364bb95937fe72586342eac05c40cf90df8"
+    "runId": "issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a",
+    "caseResultsSha256": "52e59e8317a171fc5fa0433dd98ba3c9cbc800fdaf0e5678b7ecf0258621914d"
   },
   "humanReviewers": [],
   "rawResults": [
@@ -640,7 +668,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -656,7 +684,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-injection",
@@ -664,7 +692,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "observedLookupSummary": {
@@ -684,7 +712,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 54
+          "latencyMs": 46
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -696,14 +724,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 53
         }
       ],
-      "turnLatencyMs": 263,
+      "turnLatencyMs": 269,
       "latencyPhase": "cold",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -925,7 +966,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -949,7 +990,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -957,7 +998,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -1009,7 +1050,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -1021,14 +1062,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 47
         }
       ],
-      "turnLatencyMs": 514,
+      "turnLatencyMs": 260,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -1251,7 +1305,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "help-centre",
@@ -1275,7 +1329,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -1283,7 +1337,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -1335,7 +1389,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 51
+          "latencyMs": 49
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -1347,14 +1401,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "turnLatencyMs": 516,
+      "turnLatencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -1617,7 +1684,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -1633,7 +1700,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -1641,7 +1708,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         }
       ],
       "observedLookupSummary": {
@@ -1661,7 +1728,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 52
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -1673,14 +1740,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 46
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 45
         }
       ],
-      "turnLatencyMs": 525,
+      "turnLatencyMs": 267,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -1943,7 +2023,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -1951,7 +2031,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -1967,7 +2047,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         }
       ],
       "observedLookupSummary": {
@@ -1987,7 +2067,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 51
+          "latencyMs": 57
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -1999,14 +2079,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 52
         }
       ],
-      "turnLatencyMs": 519,
+      "turnLatencyMs": 521,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -2217,7 +2310,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "help-centre",
@@ -2233,7 +2326,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -2249,7 +2342,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -2309,7 +2402,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 52
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -2321,14 +2414,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 46
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 44
         }
       ],
-      "turnLatencyMs": 262,
+      "turnLatencyMs": 521,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -2541,7 +2647,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -2565,7 +2671,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -2589,7 +2695,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -2625,7 +2731,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -2637,14 +2743,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 50
+          "latencyMs": 48
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 47
         }
       ],
-      "turnLatencyMs": 263,
+      "turnLatencyMs": 262,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -2904,7 +3023,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -2912,7 +3031,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -2928,7 +3047,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         }
       ],
       "observedLookupSummary": {
@@ -2948,7 +3067,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 52
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -2960,14 +3079,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "turnLatencyMs": 269,
+      "turnLatencyMs": 523,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3235,7 +3367,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-conflict",
@@ -3243,7 +3375,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-injection",
@@ -3251,7 +3383,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "observedLookupSummary": {
@@ -3271,7 +3403,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 49
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -3283,14 +3415,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 46
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 54
         }
       ],
-      "turnLatencyMs": 261,
+      "turnLatencyMs": 262,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3505,7 +3650,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -3513,7 +3658,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-security",
@@ -3521,7 +3666,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -3597,7 +3742,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 54
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -3609,14 +3754,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 54
         }
       ],
-      "turnLatencyMs": 262,
+      "turnLatencyMs": 518,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3662,7 +3820,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 51
+          "latencyMs": 50
         },
         {
           "provider": "my_orders",
@@ -3674,7 +3832,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 9
+          "latencyMs": 13
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -3686,14 +3844,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 52
         }
       ],
-      "turnLatencyMs": 515,
+      "turnLatencyMs": 268,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3739,7 +3910,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 54
+          "latencyMs": 47
         },
         {
           "provider": "my_orders",
@@ -3751,7 +3922,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 5
+          "latencyMs": 8
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -3764,13 +3935,26 @@
           "outputTokens": 100,
           "costUsd": 0.0007,
           "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 51
         }
       ],
-      "turnLatencyMs": 516,
+      "turnLatencyMs": 521,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3816,7 +4000,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 48
         },
         {
           "provider": "my_orders",
@@ -3828,7 +4012,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 7
+          "latencyMs": 6
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -3840,14 +4024,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "turnLatencyMs": 519,
+      "turnLatencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3890,14 +4087,27 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 48
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 49
         }
       ],
-      "turnLatencyMs": 521,
+      "turnLatencyMs": 262,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -3943,7 +4153,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 53
+          "latencyMs": 52
         },
         {
           "provider": "my_orders",
@@ -3955,7 +4165,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 8
+          "latencyMs": 6
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -3967,14 +4177,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 53
         }
       ],
-      "turnLatencyMs": 519,
+      "turnLatencyMs": 260,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4032,7 +4255,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 12
+          "latencyMs": 8
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4044,14 +4267,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 51
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 52
         }
       ],
-      "turnLatencyMs": 521,
+      "turnLatencyMs": 518,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4097,7 +4333,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "help-centre",
@@ -4121,7 +4357,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -4129,7 +4365,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -4181,7 +4417,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 50
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4193,14 +4429,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "turnLatencyMs": 269,
+      "turnLatencyMs": 263,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4246,7 +4495,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 45
+          "latencyMs": 52
         },
         {
           "provider": "my_orders",
@@ -4258,7 +4507,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 7
+          "latencyMs": 12
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4270,14 +4519,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 46
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 48
         }
       ],
-      "turnLatencyMs": 268,
+      "turnLatencyMs": 524,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4320,14 +4582,27 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 49
         }
       ],
-      "turnLatencyMs": 268,
+      "turnLatencyMs": 524,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4371,13 +4646,26 @@
           "outputTokens": 56,
           "costUsd": 0.00001579,
           "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 46
         }
       ],
-      "turnLatencyMs": 522,
+      "turnLatencyMs": 264,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4420,14 +4708,27 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 49
         }
       ],
-      "turnLatencyMs": 518,
+      "turnLatencyMs": 265,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4470,14 +4771,27 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 47
         }
       ],
-      "turnLatencyMs": 259,
+      "turnLatencyMs": 265,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4563,7 +4877,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -4579,7 +4893,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-injection",
@@ -4587,7 +4901,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "observedLookupSummary": {
@@ -4607,7 +4921,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4619,18 +4933,6 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
-        },
-        {
-          "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
-          "model": "deepseek-flash",
-          "status": "succeeded",
-          "fallback": false,
-          "transport": "unverified",
-          "inputTokens": 1000,
-          "outputTokens": 100,
-          "costUsd": 0.0007,
           "latencyMs": 45
         },
         {
@@ -4643,14 +4945,27 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 45
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 51
         }
       ],
-      "turnLatencyMs": 512,
+      "turnLatencyMs": 261,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4696,7 +5011,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "help-centre",
@@ -4720,7 +5035,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -4728,7 +5043,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -4780,7 +5095,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4792,7 +5107,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4804,11 +5119,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 50
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -4819,11 +5134,12 @@
           "latencyMs": 50
         }
       ],
-      "turnLatencyMs": 521,
+      "turnLatencyMs": 520,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -4869,7 +5185,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -4893,7 +5209,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -4901,7 +5217,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -4953,7 +5269,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 52
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4965,7 +5281,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -4977,11 +5293,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -4989,14 +5305,15 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 51
         }
       ],
-      "turnLatencyMs": 521,
+      "turnLatencyMs": 261,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -5082,7 +5399,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-conflict",
@@ -5090,7 +5407,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -5106,7 +5423,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "observedLookupSummary": {
@@ -5138,7 +5455,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -5150,11 +5467,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -5162,14 +5479,15 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 50
         }
       ],
-      "turnLatencyMs": 522,
+      "turnLatencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -5431,7 +5749,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -5439,7 +5757,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -5447,7 +5765,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -5475,7 +5793,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -5487,7 +5805,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 45
+          "latencyMs": 49
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -5499,11 +5817,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 46
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -5511,14 +5829,15 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 46
         }
       ],
-      "turnLatencyMs": 518,
+      "turnLatencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -5739,7 +6058,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -5747,7 +6066,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -5787,7 +6106,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -5823,7 +6142,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 55
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -5835,7 +6154,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 46
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -5847,11 +6166,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -5859,14 +6178,15 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 54
         }
       ],
-      "turnLatencyMs": 525,
+      "turnLatencyMs": 260,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -6083,7 +6403,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -6099,7 +6419,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -6115,7 +6435,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "help-centre",
@@ -6175,7 +6495,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -6187,7 +6507,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 46
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -6199,11 +6519,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -6211,14 +6531,15 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 52
         }
       ],
-      "turnLatencyMs": 512,
+      "turnLatencyMs": 519,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     },
@@ -6261,14 +6582,27 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 53
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 53
         }
       ],
-      "turnLatencyMs": 263,
+      "turnLatencyMs": 524,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
-        "reasonCodes": []
+        "reasonCodes": [],
+        "fixtureVerdict": "pass"
       },
       "humanReview": "pending"
     }
@@ -6386,7 +6720,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -6402,7 +6736,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-injection",
@@ -6410,7 +6744,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "retrieval": {
@@ -6609,7 +6943,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 54
+          "latencyMs": 46
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -6621,10 +6955,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 53
         }
       ],
-      "latencyMs": 263,
+      "latencyMs": 269,
       "latencyPhase": "cold",
       "llmJudge": {
         "verdict": "pending",
@@ -6706,7 +7052,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -6730,7 +7076,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -6738,7 +7084,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -6969,7 +7315,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -6981,10 +7327,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 47
         }
       ],
-      "latencyMs": 514,
+      "latencyMs": 260,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -7068,7 +7426,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "help-centre",
@@ -7092,7 +7450,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -7100,7 +7458,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -7332,7 +7690,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 51
+          "latencyMs": 49
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -7344,10 +7702,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "latencyMs": 516,
+      "latencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -7473,7 +7843,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -7489,7 +7859,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -7497,7 +7867,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         }
       ],
       "retrieval": {
@@ -7697,7 +8067,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 52
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -7709,10 +8079,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 46
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 45
         }
       ],
-      "latencyMs": 525,
+      "latencyMs": 267,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -7836,7 +8218,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -7844,7 +8226,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -7860,7 +8242,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         }
       ],
       "retrieval": {
@@ -8060,7 +8442,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 51
+          "latencyMs": 57
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -8072,10 +8454,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 52
         }
       ],
-      "latencyMs": 519,
+      "latencyMs": 521,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -8152,7 +8546,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "help-centre",
@@ -8168,7 +8562,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -8184,7 +8578,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -8420,7 +8814,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 52
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -8432,10 +8826,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 46
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 44
         }
       ],
-      "latencyMs": 262,
+      "latencyMs": 521,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -8526,7 +8932,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -8550,7 +8956,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -8574,7 +8980,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -8780,7 +9186,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -8792,10 +9198,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 50
+          "latencyMs": 48
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 47
         }
       ],
-      "latencyMs": 263,
+      "latencyMs": 262,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -8911,7 +9329,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -8919,7 +9337,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -8935,7 +9353,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         }
       ],
       "retrieval": {
@@ -9138,7 +9556,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 52
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -9150,10 +9568,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "latencyMs": 269,
+      "latencyMs": 523,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -9277,7 +9707,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-conflict",
@@ -9285,7 +9715,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-injection",
@@ -9293,7 +9723,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "retrieval": {
@@ -9496,7 +9926,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 49
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -9508,10 +9938,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 46
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 54
         }
       ],
-      "latencyMs": 261,
+      "latencyMs": 262,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -9592,7 +10034,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -9600,7 +10042,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-security",
@@ -9608,7 +10050,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -9864,7 +10306,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 54
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -9876,10 +10318,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 54
         }
       ],
-      "latencyMs": 262,
+      "latencyMs": 518,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -9967,7 +10421,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 51
+          "latencyMs": 50
         },
         {
           "provider": "my_orders",
@@ -9979,7 +10433,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 9
+          "latencyMs": 13
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -9991,10 +10445,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 52
         }
       ],
-      "latencyMs": 515,
+      "latencyMs": 268,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10085,7 +10551,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 54
+          "latencyMs": 47
         },
         {
           "provider": "my_orders",
@@ -10097,7 +10563,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 5
+          "latencyMs": 8
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -10110,9 +10576,21 @@
           "outputTokens": 100,
           "costUsd": 0.0007,
           "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 51
         }
       ],
-      "latencyMs": 516,
+      "latencyMs": 521,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10197,7 +10675,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 48
         },
         {
           "provider": "my_orders",
@@ -10209,7 +10687,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 7
+          "latencyMs": 6
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -10221,10 +10699,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 47
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "latencyMs": 519,
+      "latencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10305,10 +10795,22 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 48
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 49
         }
       ],
-      "latencyMs": 521,
+      "latencyMs": 262,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10399,7 +10901,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 53
+          "latencyMs": 52
         },
         {
           "provider": "my_orders",
@@ -10411,7 +10913,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 8
+          "latencyMs": 6
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -10423,10 +10925,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 45
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 53
         }
       ],
-      "latencyMs": 519,
+      "latencyMs": 260,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10523,7 +11037,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 12
+          "latencyMs": 8
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -10535,10 +11049,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 51
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 52
         }
       ],
-      "latencyMs": 521,
+      "latencyMs": 518,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10601,7 +11127,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "help-centre",
@@ -10625,7 +11151,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -10633,7 +11159,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -10688,7 +11214,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 50
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -10700,10 +11226,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 50
         }
       ],
-      "latencyMs": 269,
+      "latencyMs": 263,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10771,7 +11309,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 45
+          "latencyMs": 52
         },
         {
           "provider": "my_orders",
@@ -10783,7 +11321,7 @@
           "inputTokens": null,
           "outputTokens": null,
           "costUsd": null,
-          "latencyMs": 7
+          "latencyMs": 12
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -10795,10 +11333,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 46
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 48
         }
       ],
-      "latencyMs": 268,
+      "latencyMs": 524,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10856,10 +11406,22 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 49
         }
       ],
-      "latencyMs": 268,
+      "latencyMs": 524,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10918,9 +11480,21 @@
           "outputTokens": 56,
           "costUsd": 0.00001579,
           "latencyMs": 47
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 46
         }
       ],
-      "latencyMs": 522,
+      "latencyMs": 264,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -10979,10 +11553,22 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 49
         }
       ],
-      "latencyMs": 518,
+      "latencyMs": 265,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -11041,10 +11627,22 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 48
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 47
         }
       ],
-      "latencyMs": 259,
+      "latencyMs": 265,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -11154,7 +11752,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -11170,7 +11768,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "eval-injection",
@@ -11178,7 +11776,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "retrieval": null,
@@ -11201,7 +11799,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -11213,18 +11811,6 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
-        },
-        {
-          "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
-          "model": "deepseek-flash",
-          "status": "succeeded",
-          "fallback": false,
-          "transport": "unverified",
-          "inputTokens": 1000,
-          "outputTokens": 100,
-          "costUsd": 0.0007,
           "latencyMs": 45
         },
         {
@@ -11237,10 +11823,22 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 45
+          "latencyMs": 50
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 51
         }
       ],
-      "latencyMs": 512,
+      "latencyMs": 261,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -11307,7 +11905,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "help-centre",
@@ -11331,7 +11929,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-security",
@@ -11339,7 +11937,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "help-centre",
@@ -11394,7 +11992,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -11406,7 +12004,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -11418,11 +12016,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 50
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -11433,7 +12031,7 @@
           "latencyMs": 50
         }
       ],
-      "latencyMs": 521,
+      "latencyMs": 520,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -11505,7 +12103,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -11529,7 +12127,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -11537,7 +12135,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "policies",
@@ -11592,7 +12190,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 52
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -11604,7 +12202,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -11616,11 +12214,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 51
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -11628,10 +12226,10 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 49
+          "latencyMs": 51
         }
       ],
-      "latencyMs": 521,
+      "latencyMs": 261,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -11744,7 +12342,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-conflict",
@@ -11752,7 +12350,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -11768,7 +12366,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         }
       ],
       "retrieval": null,
@@ -11803,7 +12401,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -11815,11 +12413,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -11827,10 +12425,10 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 50
         }
       ],
-      "latencyMs": 522,
+      "latencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -11956,7 +12554,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "eval-injection",
@@ -11964,7 +12562,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -11972,7 +12570,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -12179,7 +12777,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 46
+          "latencyMs": 53
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -12191,7 +12789,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 45
+          "latencyMs": 49
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -12203,11 +12801,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 46
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -12215,10 +12813,10 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 46
         }
       ],
-      "latencyMs": 518,
+      "latencyMs": 517,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -12307,7 +12905,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "eval-conflict",
@@ -12315,7 +12913,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -12355,7 +12953,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -12569,7 +13167,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 55
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -12581,7 +13179,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 46
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -12593,11 +13191,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 50
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -12605,10 +13203,10 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 54
         }
       ],
-      "latencyMs": 525,
+      "latencyMs": 260,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -12692,7 +13290,7 @@
           "page": null,
           "contentSha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa",
           "ordinal": 0,
-          "versionId": "35c277ac-1806-48a8-b2bb-0f2a689599e4"
+          "versionId": "e1decb9f-3ac0-4df8-8059-91594774964c"
         },
         {
           "source": "policies",
@@ -12708,7 +13306,7 @@
           "page": null,
           "contentSha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09",
           "ordinal": 0,
-          "versionId": "a5cd1885-cc4f-46e9-989a-d125b352cfc4"
+          "versionId": "823fd07d-fbd5-4113-8356-ed26b1158c16"
         },
         {
           "source": "policies",
@@ -12724,7 +13322,7 @@
           "page": null,
           "contentSha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313",
           "ordinal": 0,
-          "versionId": "737a8855-c68f-446e-bac3-67d553e322b4"
+          "versionId": "7edea4d8-65e0-4cd3-ac32-d629678ae643"
         },
         {
           "source": "help-centre",
@@ -12966,7 +13564,7 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 48
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -12978,7 +13576,7 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 48
+          "latencyMs": 46
         },
         {
           "provider": "deepseek/deepseek-flash",
@@ -12990,11 +13588,11 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 47
         },
         {
           "provider": "deepseek/deepseek-flash",
-          "operation": "extraction",
+          "operation": "judge",
           "model": "deepseek-flash",
           "status": "succeeded",
           "fallback": false,
@@ -13002,10 +13600,10 @@
           "inputTokens": 1000,
           "outputTokens": 100,
           "costUsd": 0.0007,
-          "latencyMs": 44
+          "latencyMs": 52
         }
       ],
-      "latencyMs": 512,
+      "latencyMs": 519,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
@@ -13076,10 +13674,22 @@
           "inputTokens": 376,
           "outputTokens": 56,
           "costUsd": 0.00001579,
-          "latencyMs": 47
+          "latencyMs": 53
+        },
+        {
+          "provider": "deepseek/deepseek-flash",
+          "operation": "judge",
+          "model": "deepseek-flash",
+          "status": "succeeded",
+          "fallback": false,
+          "transport": "unverified",
+          "inputTokens": 1000,
+          "outputTokens": 100,
+          "costUsd": 0.0007,
+          "latencyMs": 53
         }
       ],
-      "latencyMs": 263,
+      "latencyMs": 524,
       "latencyPhase": "warm",
       "llmJudge": {
         "verdict": "pending",
