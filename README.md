@@ -118,6 +118,18 @@ A rerun creates only what is missing and prints `Already exists:` for the rest. 
 - **Start with no chat history in the shop.** Sign out, then clear the site data of `localhost:3300`.
 - **Wipe everything.** `docker compose down -v` deletes all local data: every Business, account and conversation, not only the demo's.
 
+## Portfolio evaluation (issue #36)
+
+The frozen 30-case Northwind suite is shown in the [review table](evaluation/portfolio-v1/corpus-review.md); the folder also contains a [corpus approval template](evaluation/portfolio-v1/corpus-approval.template.json) and [human review checklist](evaluation/portfolio-v1/HUMAN-REVIEW.md). The latest local fixture report is [Markdown](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe.md) and [JSON](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe.json), with a [SHA-256 sidecar](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T16-35-36-193Z-64f7debe.json.sha256).
+
+| Latest run | Result |
+| --- | --- |
+| Local fixture, 30 cases | 30/30 deterministic assertions passed; cleanup passed. Human review, LLM judging and connected-provider gates remain pending. Fixture responses do not measure live model quality. |
+
+Run locally with `node --env-file=.env evaluation/portfolio-v1/run.mjs --fixture`. Evaluation requires Ada's demo memory to be disabled and empty, and the reserved `eval-conflict`, `eval-injection` and `eval-security` source refs to be unused. The runner refuses collisions and restores the published configuration, temporary sources, permissions and any evaluation memory it changed.
+
+For a connected run, review the corpus table, copy the approval template to `evaluation/portfolio-v1/corpus-approval.json`, and fill the reviewer, approval date and SHA-256 of `cases.v1.json` (`shasum -a 256 evaluation/portfolio-v1/cases.v1.json`). Configure `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY` in `.env` (optionally `DASHSCOPE_API_KEY` for Qwen), then start the connected demo stack with `docker compose -f compose.yaml -f compose.connected.yaml up --build -d --wait`. If Northwind is not seeded yet, use the connected seed command from Portfolio demo. Run `node --env-file=.env evaluation/portfolio-v1/run.mjs --connected`; it refuses until the approval digest matches. Afterward, complete that run's `<run-id>.human-reviews.json` and finalize with `node evaluation/portfolio-v1/run.mjs --review=evaluation/portfolio-v1/results/<run-id>.json --human=evaluation/portfolio-v1/results/<run-id>.human-reviews.json`. Finalization verifies the unchanged report checksum and recorded connected provider traces, preserves the original run ID and result digest, and makes no provider call. Fixture replies cannot be finalized as connected evidence.
+
 ## Configuration (JSON)
 
 Each Business has one shared configuration draft and a series of immutable published versions. Owners select **Manage**, edit **Configuration JSON**, then **Save draft** or **Publish**. Support Operators and other Businesses get no editor and `404` from the API.

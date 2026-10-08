@@ -1,6 +1,7 @@
 """Durable turn worker: short transactional claims/transitions, bounded leases, no replay after interruption.
 Each turn runs its pinned published workflow within fixed budgets and the 60-second deadline."""
 import memory
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -363,7 +364,7 @@ class Turn:
         # The best passages of each source, so a lower-priority source can never crowd a higher-priority one out of the evidence.
         # ponytail: exact scan of the Business's passages, no vector index; add a filtered HNSW index when a Business outgrows it.
         rows = self.connection.execute(
-            "SELECT id,version_id,ref,document,page,content FROM (SELECT c.id,c.version_id,s.ref,coalesce(c.url,v.document) AS document,c.page,c.content,"
+            "SELECT id,version_id,ordinal,ref,document,page,content FROM (SELECT c.id,c.version_id,c.ordinal,s.ref,coalesce(c.url,v.document) AS document,c.page,c.content,"
             "c.embedding <=> %s::vector AS distance,row_number() OVER (PARTITION BY c.source_id ORDER BY c.embedding <=> %s::vector) AS rank "
             "FROM source_chunks c JOIN knowledge_sources s ON s.id=c.source_id AND s.active_version_id=c.version_id "
             "JOIN source_versions v ON v.id=c.version_id WHERE c.business_id=%s AND s.business_id=%s AND s.deleted_at IS NULL "
@@ -373,9 +374,9 @@ class Turn:
         priority = {s['id']: s['priority'] for s in self.document.get('sources', [])}
         self.evidence = self.evidence or []
         seen, before = {e['chunk'] for e in self.evidence}, len(self.evidence)
-        for chunk, version, ref, document, page, text in rows:
+        for chunk, version, ordinal, ref, document, page, text in rows:
             if chunk not in seen:
-                self.evidence.append({'chunk': chunk, 'version_id': version, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
+                self.evidence.append({'chunk': chunk, 'version_id': version, 'ordinal': ordinal, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
                                       'priority': priority[ref], 'document': document, 'page': page, 'text': text})
         # The trace references the passages this step added, never their text.
         self.detail['evidence'] = [reference(e) for e in self.evidence[before:]]
@@ -793,8 +794,10 @@ class Turn:
 
 
 def reference(evidence):
-    """What a trace may show of a passage: where it came from, not what it says."""
-    return {k: evidence[k] for k in ('source', 'document', 'page')}
+    """Value-free passage identity for owner traces: source location and a content fingerprint, never the passage text."""
+    return {'source': evidence['source'], 'document': evidence['document'], 'page': evidence['page'],
+            'version_id': str(evidence['version_id']), 'ordinal': evidence['ordinal'],
+            'content_sha256': hashlib.sha256(evidence['text'].encode('utf-8')).hexdigest()}
 
 
 def literal(vector):

@@ -28,7 +28,15 @@ async function trace(client:PoolClient,business:string,id:string) {
       'completion_tokens',a.completion_tokens,'cost_usd',a.cost_usd,'started_at',a.started_at,'finished_at',a.finished_at) ORDER BY a.id)
       FROM execution_attempts a WHERE a.job_id=j.id),'[]') AS attempts
     FROM jobs j WHERE j.business_id=$1 AND j.conversation_id=$2 AND j.kind='turn' ORDER BY j.created_at,j.id`,[business,id]);
-  return {...found.rows[0],turns:turns.rows};
+  // Memory extraction is an operation attached to a completed turn. Expose only its state and usage, never extracted values.
+  const extractions=await client.query(`SELECT e.status,
+    coalesce((SELECT json_agg(json_build_object('target',a.target,'status',a.status,'served_model',a.served_model,
+      'prompt_tokens',a.prompt_tokens,'completion_tokens',a.completion_tokens,'cost_usd',a.cost_usd,
+      'started_at',a.started_at,'finished_at',a.finished_at) ORDER BY a.id)
+      FROM execution_attempts a WHERE a.job_id=e.job_id AND a.operation='extraction'),'[]') AS attempts
+    FROM memory_extractions e JOIN jobs j ON j.id=e.job_id
+    WHERE e.business_id=$1 AND j.conversation_id=$2 ORDER BY j.created_at,j.id`,[business,id]);
+  return {...found.rows[0],turns:turns.rows,extractions:extractions.rows};
 }
 // Owner-only preview chat and execution traces; every request rechecks the current Owner Membership under the Business lock.
 export async function traces(req:IncomingMessage,path:string,user:{id:string},json:(status:number,value:unknown)=>void) {

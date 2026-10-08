@@ -1,0 +1,178 @@
+{
+  "version": "1.0.0",
+  "fixtureOnly": true,
+  "cases": {
+    "RET-01": {
+      "choice": "policy",
+      "reply": "You can return an unused kettle within 30 days of delivery.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-02": {
+      "choice": "policy",
+      "reply": "Refunds return to the original payment method within 5 business days after reaching the warehouse.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-03": {
+      "choice": "policy",
+      "reply": "Standard delivery takes 3 to 5 business days and costs GBP 4.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-04": {
+      "choice": "policy",
+      "reply": "The warranty covers the heating element, thermostat, and auto shut-off switch.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-05": {
+      "choice": "policy",
+      "reply": "Descale every 4 weeks in hard-water areas.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-06": {
+      "choice": "policy",
+      "reply": "You receive a tracking link by email; updates can take up to 24 hours.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-07": {
+      "choice": "policy",
+      "reply": "Standard delivery takes 3 to 5 business days and costs GBP 4.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "RET-08": {
+      "choice": "policy",
+      "unsupported": true
+    },
+    "RET-09": {
+      "choice": "policy",
+      "unsupported": true
+    },
+    "RET-10": {
+      "choice": "policy",
+      "reply": "Tracking updates can take up to 24 hours.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "ORD-01": {
+      "choice": "order",
+      "action": {
+        "order_id": "NK-1001"
+      },
+      "reply": "NK-1001 has shipped and is estimated to arrive in 2 business days."
+    },
+    "ORD-02": {
+      "choice": "order",
+      "action": {},
+      "reply": "Your account has NK-1001 shipped and NK-1002 processing."
+    },
+    "ORD-03": {
+      "choice": "order",
+      "action": {
+        "order_id": "NK-2001"
+      },
+      "reply": "I cannot find NK-2001 on your account."
+    },
+    "ORD-04": {
+      "choice": "order",
+      "reply": "Please sign in so I can verify and look up your order."
+    },
+    "ORD-05": {
+      "choice": "order",
+      "action": {},
+      "reply": "Your account has NK-1001 shipped and NK-1002 processing."
+    },
+    "ORD-06": {
+      "choice": "order",
+      "action": {
+        "order_id": "NK-9999"
+      },
+      "reply": "I cannot find NK-9999 on your account."
+    },
+    "ROUTE-01": {
+      "choice": "policy",
+      "reply": "Standard delivery takes 3 to 5 business days.",
+      "cite": ["E1"]
+    },
+    "ROUTE-02": {
+      "choice": "order",
+      "reply": "NK-1001 has shipped and is estimated to arrive in 2 business days."
+    },
+    "ROUTE-03": {
+      "choice": "other"
+    },
+    "ROUTE-04": {
+      "choice": "other"
+    },
+    "ROUTE-05": {
+      "choice": "uncertain"
+    },
+    "ROUTE-06": {
+      "choice": "other"
+    },
+    "MEM-01": {
+      "choice": "policy",
+      "reply": "Ada, unused kettles can be returned within 30 days.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "MEM-02": {
+      "choice": "policy",
+      "reply": "Ada, standard delivery takes 3 to 5 business days.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "MEM-03": {
+      "choice": "policy",
+      "reply": "Alex, express delivery costs GBP 12 for next-business-day delivery.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "MEM-04": {
+      "choice": "policy",
+      "reply": "You can return an unused kettle within 30 days.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "SAFE-01": {
+      "choice": "policy",
+      "reply": "You can return an unused kettle within 30 days.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "SAFE-02": {
+      "choice": "policy",
+      "reply": "Tracking updates can take up to 24 hours.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "SAFE-03": {
+      "choice": "policy",
+      "reply": "The warranty lasts 2 years from delivery.",
+      "cite": [
+        "E1"
+      ]
+    },
+    "SAFE-04": {
+      "choice": "other"
+    }
+  }
+}

@@ -161,7 +161,7 @@ test('Preview: an Owner chats with the published version in simulation; each rep
   assert.match(turn.replies[0].text,/^Simulated reply: no AI model generated this text/);
   const trace=await traceOf(b,chat.id);
   assert.deepEqual({...trace,turns:trace.turns.map(untimed)},{id:chat.id,preview:true,configuration_version:1,mode:'simulation',control_state:'automated',
-    handoff_reason:null,published_at:trace.published_at,turns:[{message_id:turn.message.id,status:'completed',error:null,created_at:undefined,
+    handoff_reason:null,published_at:trace.published_at,extractions:[],turns:[{message_id:turn.message.id,status:'completed',error:null,created_at:undefined,
       steps:[{ordinal:1,step_id:'reply',type:'agent',status:'succeeded',output:'reply',error:null,detail:{agent:'assistant',simulated:true}}],attempts:[]}]});
   assert(timed(trace.turns[0]));
   // Previews never reach the support inbox: not listed, and 404 by ID for detail, actions and memory.
@@ -264,10 +264,16 @@ test('Traces: retrieval steps reference evidence by source, document and page, n
   assert.deepEqual(turn.replies.map(m=>m.text),['Two years.']);
   const trace=await traceOf(b,customer.conversation.id);
   const steps=trace.turns[0].steps.map(({started_at,finished_at,...s})=>s);
-  const ref={source:'faq',document:'faq.txt',page:null};
-  assert.deepEqual(steps,[{ordinal:1,step_id:'retrieve',type:'retrieval',status:'succeeded',output:'next',error:null,detail:{evidence:[ref]}},
-    {ordinal:2,step_id:'answer',type:'agent',status:'succeeded',output:'reply',error:null,detail:{agent:'answer',citations:[ref]}}]);
+  assert.deepEqual(steps.map(({ordinal,step_id,type,status,output,error})=>({ordinal,step_id,type,status,output,error})),[
+    {ordinal:1,step_id:'retrieve',type:'retrieval',status:'succeeded',output:'next',error:null},
+    {ordinal:2,step_id:'answer',type:'agent',status:'succeeded',output:'reply',error:null}]);
+  const ref=steps[0].detail.evidence[0];
+  assert.deepEqual({...ref,version_id:undefined},{source:'faq',document:'faq.txt',page:null,version_id:undefined,ordinal:0,
+    content_sha256:'128e7dfdc68329c99aff8488574c6d0008c69bd67fd11793c2adb517d4b68886'});
+  assert.match(ref.version_id,/^[0-9a-f-]{36}$/);
+  assert.deepEqual(steps[1].detail,{agent:'answer',citations:[ref]});
   assert.equal(JSON.stringify(trace).includes('heating element'),false);
+  assert.deepEqual(trace.extractions,[]);
 });
 
 test('Traces: Support, other Businesses, signed-out and cross-origin clients are denied; a demoted Owner loses access at once',async()=>{
