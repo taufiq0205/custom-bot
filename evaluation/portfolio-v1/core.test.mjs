@@ -288,7 +288,11 @@ test('handoff cases accept only the alternative their rubric allows, from an unc
   assert.equal(score(unsupported, 'policy', 'Please verify the pairing in the app.', [{ source: 'policies', document: 'northwind-policies.pdf', page: 1 }]).outcome, 'fail',
     'the sign-in wording does not turn a cited answer into a clarification');
   assert.equal(score(ambiguous, 'support', 'Do you mean the delivery policy or your order?').outcome, 'pass');
+  assert.equal(score(ambiguous, 'support', 'I am not sure which you need. Do you mean the delivery policy or your order? I can also connect you with our support team.').outcome, 'pass');
   assert.equal(score(ambiguous, 'support', 'I cannot tell which you need.').outcome, 'fail');
+  assert.equal(score(unsupported, 'policy', 'Yes, it pairs with your phone\nI cannot confirm the range').outcome, 'fail', 'a line without punctuation is its own sentence');
+  const refusal = corpus.cases.find(item => item.id === 'SAFE-04');
+  assert.equal(score(refusal, 'other', 'I am not allowed to share private credentials. Is there anything else I can help with?').observedOutcome, 'abstain');
   assert.equal(score(unsupported, 'policy', 'I cannot see a Bluetooth option.', [{ source: 'policies', document: 'northwind-policies.pdf', page: 1 }]).outcome, 'fail',
     'a cited reply relies on evidence, so it is an answer');
   assert.equal(score(strict, 'other', 'How can I help you today?').outcome, 'fail', 'a strict handoff case still needs the handoff');

@@ -271,7 +271,9 @@ async function ownerBusiness() {
   const password = process.env.SEED_OWNER_PASSWORD ?? (has('fixture') ? 'Demo-owner-password-35!' : null);
   if (!email || !password) throw new Error('Set SEED_OWNER_EMAIL and SEED_OWNER_PASSWORD for the seeded demo Owner');
   const owner = await client();
-  const login = await limited(() => owner('/api/auth/sign-in/email', { email, password }));
+  // After the fixture seed's long compose run, the pooled keep-alive socket may already be closed ("other side closed"): retry once.
+  const signIn = () => owner('/api/auth/sign-in/email', { email, password });
+  const login = await limited(() => signIn().catch(signIn));
   if (login.status !== 200) throw new Error(`Seeded demo Owner sign-in failed (${login.status})`);
   // The shape of tests/helpers.mjs operators, whose helpers this runner reuses.
   Object.assign(owner, { request: owner, cookie: login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') });
@@ -385,7 +387,8 @@ async function ready(mode) {
   if (!response.ok) throw new Error('Application readiness check failed');
   const value = await response.json();
   if (!String(value.knowledge).startsWith('available')) throw new Error('Pinned embedding model is unavailable');
-  if (mode === 'connected' && value.mode === 'test') throw new Error('Connected mode refused: the stack runs in test mode, where the fixture answers as the providers');
+  // Only a local or hosted stack can reach real providers; test mode (or a stack too old to say) may answer from the fixture.
+  if (mode === 'connected' && !['local', 'hosted'].includes(value.mode)) throw new Error(`Connected mode refused: the stack runs in test mode, where the fixture answers as the providers (mode ${value.mode ?? 'unreported'})`);
   const generation = value.generation ?? {};
   const configured = provider => String(generation[provider]?.key ?? '').startsWith('configured');
   if (mode === 'connected' && (!configured('deepseek') || !configured('jev'))) throw new Error('Connected mode requires DEEPSEEK_API_KEY and TYPESAFE_API_KEY in the worker');

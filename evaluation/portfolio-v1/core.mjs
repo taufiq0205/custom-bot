@@ -58,7 +58,7 @@ const JUDGE_REASON_CODES = new Set(['factual_error', 'unsupported_claim', 'wrong
 const validJudge = result => ['pass', 'fail'].includes(result?.verdict) && Array.isArray(result.reasonCodes) &&
   result.reasonCodes.every(code => JUDGE_REASON_CODES.has(code));
 const isReply = row => ['answer', 'clarify', 'abstain'].includes(row.observedOutcome);
-const ABSTAINS = /\b(?:cannot|can['’]?t|could(?:n['’]?t| not)|unable to|not able to|(?:don|doesn)['’]t have|do(?:es)? not have|no information|not (?:sure|certain|available|listed|covered|mentioned)|connect you|support team)\b/i;
+const ABSTAINS = /\b(?:cannot|can['’]?t|could(?:n['’]?t| not)|unable to|not able to|not (?:allowed|permitted) to|won['’]?t|(?:don|doesn)['’]t have|do(?:es)? not have|no information|not (?:sure|certain|available|listed|covered|mentioned)|connect you|support team)\b/i;
 const providerRoute = attempt => attempt.fallback || /qwen|dashscope/i.test(attempt.provider ?? '') ? 'fallback' :
   /deepseek/i.test(attempt.provider ?? '') ? 'primary' : 'provider';
 
@@ -115,10 +115,11 @@ export function scoreCase(testCase, observation, passageCatalog) {
   const alternative = expected.outcome !== 'handoff' ? null : expected.ambiguous ? 'clarify' : expected.retrieval?.unsupported || expected.security ? 'abstain' : null;
   let actualOutcome = handoff ? 'handoff' : clarification ? 'clarify' : answer ? 'answer' : 'none';
   if (alternative && answer && !handoff) {
-    const sentences = answer.split(/(?<=[.!?])\s+/).map(item => item.trim()).filter(Boolean);
+    const sentences = answer.split(/(?<=[.!?])\s+|\n+/).map(item => item.trim()).filter(Boolean);
     // ponytail: wording check per sentence; one sentence that both claims and declines passes here and is left to the reviews.
     const declines = !cited && sentences.every(item => item.endsWith('?') || ABSTAINS.test(item));
-    actualOutcome = !declines ? 'answer' : sentences.some(item => ABSTAINS.test(item)) ? 'abstain' : 'clarify';
+    const asks = sentences.some(item => item.endsWith('?'));
+    actualOutcome = !declines ? 'answer' : alternative === 'clarify' && asks ? 'clarify' : sentences.some(item => ABSTAINS.test(item)) ? 'abstain' : 'clarify';
   }
   const routeOk = expected.route === 'support' ? ['other', 'uncertain', 'failure'].includes(rawRoute) : rawRoute === expected.route;
   const outcomeOk = actualOutcome === expected.outcome || actualOutcome === alternative;
