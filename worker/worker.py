@@ -275,11 +275,17 @@ def authorize(connection, job, action, secret=False):
         return grant
     if not CIPHER:
         return 'credential key not configured'
-    sealed = bytes(credential[2])
+    value = unseal(business, action['credential'], credential[2])
+    return 'credential unreadable' if value is None else {**grant, 'headers': {credential[1]: value}}
+
+
+def unseal(business, ref, ciphertext):
+    """A stored credential's secret, or None when it cannot be read."""
+    sealed = bytes(ciphertext or b'')
     try:
-        return {**grant, 'headers': {credential[1]: CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{action["credential"]}'.encode()).decode()}}
-    except InvalidTag:
-        return 'credential unreadable'
+        return CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{ref}'.encode()).decode() if CIPHER and len(sealed) >= 28 else None
+    except (InvalidTag, ValueError):
+        return None
 
 
 def stale(connection, job, grants):
@@ -299,45 +305,39 @@ def withdrawn(connection, versions):
     return len(live) != len(versions)
 
 
-def strings(value):
+def payload_strings(value):
     """Every key and string value in a JSON-like payload."""
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
         for k, v in value.items():
             yield str(k)
-            yield from strings(v)
+            yield from payload_strings(v)
     elif isinstance(value, list):
         for v in value:
-            yield from strings(v)
+            yield from payload_strings(v)
 
 
-def contains(payload, secret):
+def in_payload(payload, secret):
     """Whether a secret appears in any payload string, raw or JSON-encoded once more (context and evidence are sent as
     JSON text inside message strings, where quotes and backslashes are escaped)."""
     forms = (secret, json.dumps(secret)[1:-1])
-    return any(form in text for text in strings(payload) for form in forms)
+    return any(form in text for text in payload_strings(payload) for form in forms)
 
 
 def payload_check(connection, business, payload):
     """Before a provider transfer: whether the payload contains any of the Business's active action credentials or any provider
     key this worker holds. Returns value-free evidence for the attempt record and the refusal reason, if any. A credential that
-    cannot be read blocks the transfer."""
+    cannot be read, or a missing payload, blocks the transfer."""
     rows = connection.execute('SELECT ref,ciphertext FROM action_credentials WHERE business_id=%s AND active ORDER BY ref',
                               (business,)).fetchall()
     check = {'checked': False, 'credential_refs': [ref for ref, _ in rows], 'provider_keys': sorted(p for p, k in KEYS.items() if k),
              'credential_exposed': False, 'provider_key_exposed': False}
-    secrets = []
-    for ref, ciphertext in rows:
-        sealed = bytes(ciphertext or b'')
-        try:
-            if not CIPHER or len(sealed) < 28:
-                raise ValueError('unreadable credential')
-            secrets.append(CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{ref}'.encode()).decode('utf-8'))
-        except (InvalidTag, ValueError):
-            return check, 'provider payload check unavailable'
-    check.update(checked=True, credential_exposed=any(contains(payload, s) for s in secrets if s),
-                 provider_key_exposed=any(contains(payload, k) for k in KEYS.values() if k))
+    secrets = [unseal(business, ref, ciphertext) for ref, ciphertext in rows]
+    if payload is None or None in secrets:
+        return check, 'provider payload check unavailable'
+    check.update(checked=True, credential_exposed=any(in_payload(payload, s) for s in secrets if s),
+                 provider_key_exposed=any(in_payload(payload, k) for k in KEYS.values() if k))
     return check, 'private secret in provider payload' if check['credential_exposed'] or check['provider_key_exposed'] else None
 
 

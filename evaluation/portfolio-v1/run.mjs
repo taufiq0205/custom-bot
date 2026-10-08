@@ -20,6 +20,10 @@ const pricing = JSON.parse(load('pricing.v1.json'));
 const judgePrompt = load('judge-prompt.v1.md').toString('utf8');
 const judgeSchema = JSON.parse(load('judge-schema.v1.json'));
 const manifest = JSON.parse(load('manifest.v1.json'));
+// Key custody: provider keys belong to the worker. The runner keeps none, even when started with --env-file=.env.
+for (const name of ['DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'TYPESAFE_API_KEY']) delete process.env[name];
+// The app's limit on one message's text.
+const MESSAGE_LIMIT = 2000;
 verifyManifest(directory, manifest);
 validateCorpus(corpus, passages);
 
@@ -201,16 +205,16 @@ function securityObservation(testCase, replyText, lookups, state, credential) {
   };
 }
 
-// The frozen LLM judge: one connected agent whose instructions are the versioned judge prompt. It runs in Owner previews, so the
-// worker alone holds the provider key, sends to its fixed endpoint, checks the payload and records usage like any turn.
-function judgeConfiguration() {
-  return { schema_version: 1, generation: { mode: 'connected' }, actions: [],
-    agents: [{ id: 'judge', name: 'LLM judge (frozen prompt v1)', instructions: judgePrompt, model: { provider: 'deepseek', name: 'deepseek-flash', temperature: 0 } }],
-    workflow: { entry: 'judge', steps: [{ id: 'judge', type: 'agent', agent: 'judge', final: true, position: { x: 0, y: 0 } },
-      { id: 'support', type: 'handoff', position: { x: 240, y: 0 } }], connections: [{ from: 'judge', output: 'unsupported', to: 'support' }] } };
-}
+// The frozen LLM judge: one connected agent whose instructions are the versioned judge prompt and schema. It runs in Owner
+// previews, so the worker alone holds the provider key, sends to its fixed endpoint, checks the payload and records usage.
+const JUDGE_CONFIGURATION = { schema_version: 1, generation: { mode: 'connected' }, actions: [],
+  agents: [{ id: 'judge', name: 'LLM judge (frozen prompt v1)', model: { provider: 'deepseek', name: 'deepseek-flash', temperature: 0 },
+    instructions: `${judgePrompt}\nSchema: ${JSON.stringify(judgeSchema)}\nPut that object, as JSON text, in the reply.` }],
+  workflow: { entry: 'judge', steps: [{ id: 'judge', type: 'agent', agent: 'judge', final: true, position: { x: 0, y: 0 } },
+    { id: 'support', type: 'handoff', position: { x: 240, y: 0 } }], connections: [{ from: 'judge', output: 'unsupported', to: 'support' }] } };
 
-// One independent preview per case. A judge reply that is missing, malformed or off-schema leaves the verdict pending.
+// One independent preview per case. A judge reply that is missing, malformed or off-schema leaves the verdict pending, and so
+// does a fixture run's scripted reply (kept as fixtureVerdict, to show the path works).
 async function judgeCase(testCase, scored, businessRecord, mode, secretValues) {
   const safe = value => redact(String(value ?? ''), secretValues);
   const text = JSON.stringify({
@@ -224,10 +228,9 @@ async function judgeCase(testCase, scored, businessRecord, mode, secretValues) {
     prompt: safe(testCase.message.replaceAll('type 2 diabetes', '[synthetic sensitive health statement]')), reply: safe(scored.observedReply),
     observed_route: scored.observedRoute, observed_outcome: scored.observedOutcome, citations: scored.observedCitations,
     retrieved_labels: scored.retrieval?.selected?.flatMap(item => item.labels) ?? [], lookup: scored.observedLookupSummary,
-    security_checked: scored.securityChecked, response_schema: judgeSchema,
-    answer_format: 'Put the verdict object matching response_schema, as JSON text, in the reply.'
+    security_checked: scored.securityChecked
   });
-  if (text.length > 2000) return { verdict: 'pending', reasonCodes: [], error: 'judge input exceeds the 2000-character message limit', attempts: [] };
+  if (text.length > MESSAGE_LIMIT) return { verdict: 'pending', reasonCodes: [], error: `judge input exceeds the ${MESSAGE_LIMIT}-character message limit`, attempts: [] };
   if (mode === 'fixture') await script('', [textOutput({ outcome: 'reply', reply: JSON.stringify({ verdict: 'pass', reason_codes: ['good_response'] }) })]);
   const preview = `/api/businesses/${businessRecord.id}/preview`;
   const created = await businessRecord.owner(preview, {});
@@ -243,12 +246,16 @@ async function judgeCase(testCase, scored, businessRecord, mode, secretValues) {
   try { parsed = JSON.parse(turn.replies.find(message => message.author === 'assistant')?.text ?? 'null'); } catch {}
   const codes = judgeSchema.properties.reason_codes.items.enum;
   if (parsed && Object.keys(parsed).length === 2 && ['pass', 'fail'].includes(parsed.verdict) && Array.isArray(parsed.reason_codes) &&
-      parsed.reason_codes.every(code => codes.includes(code))) return { verdict: parsed.verdict, reasonCodes: parsed.reason_codes, attempts };
+      parsed.reason_codes.every(code => codes.includes(code))) {
+    return mode === 'fixture' ? { verdict: 'pending', reasonCodes: [], fixtureVerdict: parsed.verdict, attempts }
+      : { verdict: parsed.verdict, reasonCodes: parsed.reason_codes, attempts };
+  }
   return { verdict: 'pending', reasonCodes: [], error: 'judge reply missing or off-schema', attempts };
 }
 
+// Polls past the worker's 60-second turn deadline.
 async function settled(read, messageId) {
-  for (let attempt = 0; attempt < 240; attempt++) {
+  for (let attempt = 0; attempt < 300; attempt++) {
     const conversation = await read();
     const current = conversation.messages.find(item => item.id === messageId);
     if (current && !['queued', 'running'].includes(current.turn_state)) {
@@ -378,6 +385,7 @@ async function ready(mode) {
   if (!response.ok) throw new Error('Application readiness check failed');
   const value = await response.json();
   if (!String(value.knowledge).startsWith('available')) throw new Error('Pinned embedding model is unavailable');
+  if (mode === 'connected' && value.mode === 'test') throw new Error('Connected mode refused: the stack runs in test mode, where the fixture answers as the providers');
   const generation = value.generation ?? {};
   const configured = provider => String(generation[provider]?.key ?? '').startsWith('configured');
   if (mode === 'connected' && (!configured('deepseek') || !configured('jev'))) throw new Error('Connected mode requires DEEPSEEK_API_KEY and TYPESAFE_API_KEY in the worker');
@@ -465,13 +473,14 @@ async function run() {
       process.stdout.write(`Recorded ${testCase.id} (${mode})\n`);
     }
     // Customer conversations stay pinned to the evaluation version; the judge's previews pin its own.
-    const judgeVersion = await publish(businessRecord, judgeConfiguration());
+    const judgeVersion = await publish(businessRecord, JUDGE_CONFIGURATION);
     const judgeRead = await businessRecord.owner(`/api/businesses/${businessRecord.id}/configuration/versions/${judgeVersion}`);
     if (judgeRead.status !== 200) throw new Error('Published judge configuration could not be read back');
     judgeConfig = { version: judgeVersion, sha256: sha256(JSON.stringify(judgeRead.data.document, null, 2)) };
     for (const scored of results) {
       const judged = await judgeCase(corpus.cases.find(testCase => testCase.id === scored.caseId), scored, businessRecord, mode, secretValues);
-      scored.llmJudge = { verdict: judged.verdict, reasonCodes: judged.reasonCodes, ...(judged.error ? { error: judged.error } : {}) };
+      scored.llmJudge = { verdict: judged.verdict, reasonCodes: judged.reasonCodes,
+        ...(judged.error ? { error: judged.error } : {}), ...(judged.fixtureVerdict ? { fixtureVerdict: judged.fixtureVerdict } : {}) };
       scored.attempts.push(...judged.attempts);
       process.stdout.write(`Judged ${scored.caseId} (${mode})\n`);
     }
@@ -486,6 +495,14 @@ async function run() {
         cleanupIssues.push('baseline configuration could not be republished');
         cleanupEvidence.push({ name: 'baseline configuration republished', status: 'fail' });
       }
+      // Publishing saved over the Owner's draft; put back the text it had before the run.
+      let restored = null;
+      try {
+        const path = `/api/businesses/${businessRecord.id}/configuration`;
+        restored = (await businessRecord.owner(path, { text: businessRecord.savedDraft, revision: (await businessRecord.owner(path)).data.revision })).status;
+      } catch {}
+      cleanupEvidence.push({ name: 'configuration draft restored', status: restored === 200 ? 'pass' : 'fail', httpStatus: restored });
+      if (restored !== 200) cleanupIssues.push('configuration draft could not be restored');
     }
     const cleanups = [];
     if (memoryTouched) cleanups.push({ name: 'demo memory reset', run: () => clearDemoMemory(businessRecord), allowed: [200] });
@@ -551,6 +568,6 @@ async function run() {
 }
 
 run().catch(error => {
-  process.stderr.write(`${redact(error?.message ?? 'Evaluation failed', [process.env.DEEPSEEK_API_KEY, process.env.TYPESAFE_API_KEY, process.env.DASHSCOPE_API_KEY])}\n`);
+  process.stderr.write(`${error?.message ?? 'Evaluation failed'}\n`);
   process.exitCode = 1;
 });

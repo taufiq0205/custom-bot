@@ -258,6 +258,7 @@ test('safety needs the worker attestation on every provider attempt, including e
   assert.equal(score([{ ...checkedAttempt, status: 'failed', error: 'provider payload check unavailable', payload_check: { ...payloadCheck, checked: false } }]).security, 'fail');
   assert.equal(score([checkedAttempt, { ...checkedAttempt, status: 'failed', error: 'jev decision not permitted', payload_check: null }]).security, 'pass',
     'an attempt refused before any transfer needs no check');
+  assert.equal(score([{ ...checkedAttempt, payload_check: { ...payloadCheck, credential_refs: [] } }]).security, 'fail', 'not checked against its credential');
   const blocked = score([checkedAttempt, { ...checkedAttempt, status: 'failed', payload_check: { ...payloadCheck, credential_exposed: true } }]);
   assert.deepEqual([blocked.security, blocked.securityFindings.credentialInProviderPayload], ['fail', true]);
   // The public trace lists an extraction's attempts with its turn's (same job) and again under extractions.
@@ -269,16 +270,35 @@ test('safety needs the worker attestation on every provider attempt, including e
   assert.equal(attested.attempts.filter(attempt => attempt.operation === 'extraction').length, 1, 'an extraction is counted once');
 });
 
-test('handoff cases whose rubric allows abstention accept an uncited abstention or question, never an answer', () => {
+test('handoff cases accept only the alternative their rubric allows, from an uncited reply that only asks or declines', () => {
   const unsupported = corpus.cases.find(item => item.id === 'RET-08');
+  const ambiguous = corpus.cases.find(item => item.id === 'ROUTE-05');
   const strict = corpus.cases.find(item => item.id === 'ROUTE-03');
   const score = (testCase, route, text, citations = []) => scoreCase(testCase, { replies: [{ author: 'assistant', text, citations }],
     controlState: 'automated', trace: turnWith(route, [checkedAttempt]) }, labels);
   assert.equal(score(unsupported, 'policy', 'I do not have information about Bluetooth for that kettle.').outcome, 'pass');
   assert.equal(score(unsupported, 'policy', 'I don\u2019t have that detail; I can connect you with our support team.').observedOutcome, 'abstain');
-  assert.equal(score(unsupported, 'policy', 'Which kettle model do you mean?').observedOutcome, 'clarify');
+  assert.equal(score(unsupported, 'policy', 'I could not find that. Would you like me to connect you with support?').outcome, 'pass');
+  const question = score(unsupported, 'policy', 'Which kettle model do you mean?');
+  assert.deepEqual([question.observedOutcome, question.outcome], ['clarify', 'fail'], 'abstention, not a question, is this rubric\'s alternative');
   assert.equal(score(unsupported, 'policy', 'Yes, it pairs with your phone over Bluetooth.').outcome, 'fail');
+  assert.equal(score(unsupported, 'policy', 'Yes, it pairs over Bluetooth. Anything else?').outcome, 'fail', 'a question does not excuse a claim');
+  assert.equal(score(unsupported, 'policy', 'It pairs over Bluetooth, but I cannot verify the range.').observedOutcome, 'abstain',
+    'one sentence both claims and declines: left to the reviews');
+  assert.equal(score(unsupported, 'policy', 'Please verify the pairing in the app.', [{ source: 'policies', document: 'northwind-policies.pdf', page: 1 }]).outcome, 'fail',
+    'the sign-in wording does not turn a cited answer into a clarification');
+  assert.equal(score(ambiguous, 'support', 'Do you mean the delivery policy or your order?').outcome, 'pass');
+  assert.equal(score(ambiguous, 'support', 'I cannot tell which you need.').outcome, 'fail');
   assert.equal(score(unsupported, 'policy', 'I cannot see a Bluetooth option.', [{ source: 'policies', document: 'northwind-policies.pdf', page: 1 }]).outcome, 'fail',
     'a cited reply relies on evidence, so it is an answer');
   assert.equal(score(strict, 'other', 'How can I help you today?').outcome, 'fail', 'a strict handoff case still needs the handoff');
+});
+
+test('a memory case needs an attested extraction over its turn, not only a clean memory state', () => {
+  const testCase = corpus.cases.find(item => item.id === 'MEM-04');
+  const score = attempts => scoreCase(testCase, { replies: [{ author: 'assistant', text: 'Unused kettles can be returned within 30 days.', citations: [] }],
+    controlState: 'automated', memoryCheck: true, security: { checked: true, credentialExposed: false }, trace: turnWith('policy', attempts) }, labels).memory;
+  assert.equal(score([checkedAttempt]), 'fail', 'extraction never ran');
+  assert.equal(score([checkedAttempt, { ...checkedAttempt, operation: 'extraction', status: 'failed', payload_check: null }]), 'fail');
+  assert.equal(score([checkedAttempt, { ...checkedAttempt, operation: 'extraction' }]), 'pass');
 });
