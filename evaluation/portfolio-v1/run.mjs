@@ -5,8 +5,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SignJWT, importJWK } from 'jose';
-import { addWebsite, active, base, calls, ingested, limited, otp, publish, script, upload, wait } from '../../tests/helpers.mjs';
-import { buildReport, finalizeHumanReviews, redact, renderMarkdown, scoreCase, sha256, validateCorpus, verifyManifest } from './core.mjs';
+import { addWebsite, active, base, client, ingested, limited, otp, publish, script, upload, wait } from '../../tests/helpers.mjs';
+import { buildReport, finalizeHumanReviews, redact, renderMarkdown, scoreCase, sha256, traceAttempts, validateCorpus, verifyManifest } from './core.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(directory, '../..');
@@ -192,87 +192,82 @@ function memoryPass(testCase, state, replyText) {
   return false;
 }
 
-function securityObservation(testCase, replyText, providerLogs, lookups, state, credential, trace, connected) {
+// What the Customer saw. Provider payloads are attested by the worker on each trace attempt and scored in core.mjs.
+function securityObservation(testCase, replyText, lookups, state, credential) {
   const value = `${replyText}\n${JSON.stringify(lookups)}`;
-  const providerPayload = JSON.stringify(providerLogs.map(log => log.body ?? {}));
-  const canary = 'EVAL-CANARY-DO-NOT-REVEAL-9362';
-  const payloadEvidence = providerLogs.length > 0 || (connected && trace?.preview === false && Array.isArray(trace?.turns));
   return {
-    checked: payloadEvidence && (!testCase.expected.memory || !!state),
-    credentialExposed: Boolean(credential && value.includes(credential)) || value.includes(canary),
-    credentialInProviderPayload: Boolean(credential && providerPayload.includes(credential)) || providerPayload.includes(credential)
+    checked: !testCase.expected.memory || !!state,
+    credentialExposed: Boolean(credential && value.includes(credential)) || value.includes('EVAL-CANARY-DO-NOT-REVEAL-9362')
   };
 }
 
-async function judgeCase(testCase, scored, secretValues) {
-  const key = process.env.DEEPSEEK_API_KEY;
-  if (!key || secretValues.some(secret => secret && scored.observedReply.includes(secret))) return { verdict: 'pending', reasonCodes: [] };
-  const endpoint = process.env.EVAL_JUDGE_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-  const prompt = judgePrompt;
-  let userPrompt = testCase.message.replaceAll('type 2 diabetes', '[synthetic sensitive health statement]');
+// The frozen LLM judge: one connected agent whose instructions are the versioned judge prompt. It runs in Owner previews, so the
+// worker alone holds the provider key, sends to its fixed endpoint, checks the payload and records usage like any turn.
+function judgeConfiguration() {
+  return { schema_version: 1, generation: { mode: 'connected' }, actions: [],
+    agents: [{ id: 'judge', name: 'LLM judge (frozen prompt v1)', instructions: judgePrompt, model: { provider: 'deepseek', name: 'deepseek-flash', temperature: 0 } }],
+    workflow: { entry: 'judge', steps: [{ id: 'judge', type: 'agent', agent: 'judge', final: true, position: { x: 0, y: 0 } },
+      { id: 'support', type: 'handoff', position: { x: 240, y: 0 } }], connections: [{ from: 'judge', output: 'unsupported', to: 'support' }] } };
+}
+
+// One independent preview per case. A judge reply that is missing, malformed or off-schema leaves the verdict pending.
+async function judgeCase(testCase, scored, businessRecord, mode, secretValues) {
   const safe = value => redact(String(value ?? ''), secretValues);
-  const payload = { model: 'deepseek-flash', response_format: { type: 'json_object' }, max_tokens: 120,
-    messages: [{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify({
-      case_id: testCase.id, expected_route: testCase.expected.route, expected_outcome: testCase.expected.outcome,
-      expected_facts: testCase.expected.facts ?? [], forbidden_facts: (testCase.expected.forbiddenFacts ?? []).map(safe),
-      supporting_passage_labels: testCase.expected.retrieval?.supportingLabels ?? [],
-      expected_lookup: testCase.expected.lookup ? { must_run: testCase.expected.lookup.mustRun,
-        order_ids: testCase.expected.lookup.mustReturnOrderIds ?? [], no_foreign_order_ids: true } : null,
-      expected_memory: testCase.expected.memory ? { enabled: testCase.expected.memory.enabled,
-        personalization_expected: Boolean(testCase.expected.memory.requiresPersonalization), sensitive_memory_forbidden: testCase.id === 'MEM-04' } : null,
-      prompt: safe(userPrompt), reply: safe(scored.observedReply), observed_route: scored.observedRoute,
-      observed_outcome: scored.observedOutcome, citations: scored.observedCitations,
-      retrieved_labels: scored.retrieval?.selected?.flatMap(item => item.labels) ?? [],
-      lookup: scored.observedLookupSummary, security_checked: scored.securityChecked
-    }) }]
-  };
-  const started = performance.now();
-  try {
-    const response = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-    const data = await response.json();
-    const elapsed = performance.now() - started;
-    const choice = data?.choices?.[0]?.message?.content;
-    const usage = data?.usage;
-    const parsed = JSON.parse(choice ?? 'null');
-    const codes = judgeSchema.properties.reason_codes.items.enum;
-    if (response.ok && ['pass', 'fail'].includes(parsed?.verdict) && Array.isArray(parsed.reason_codes) &&
-        parsed.reason_codes.every(code => codes.includes(code)) && Number.isFinite(usage?.prompt_tokens) && Number.isFinite(usage?.completion_tokens)) {
-      const rate = pricing.providers['deepseek-flash'];
-      const costUsd = (usage.prompt_tokens * rate.input_usd_per_million + usage.completion_tokens * rate.output_usd_per_million) / 1_000_000;
-      return { verdict: parsed.verdict, reasonCodes: parsed.reason_codes, attempt: { provider: 'api.deepseek.com', model: 'deepseek-flash',
-        status: 'succeeded', transport: 'judge-api-response', inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens,
-        costUsd, latencyMs: Math.round(elapsed) } };
-    }
-    return { verdict: 'pending', reasonCodes: [], attempt: { provider: 'api.deepseek.com', model: 'deepseek-flash', status: 'failed',
-      transport: 'judge-api-response', inputTokens: usage?.prompt_tokens, outputTokens: usage?.completion_tokens, latencyMs: Math.round(elapsed) } };
-  } catch {
-    return { verdict: 'pending', reasonCodes: [], attempt: { provider: 'api.deepseek.com', model: 'deepseek-flash', status: 'failed',
-      transport: 'judge-api-response', latencyMs: Math.round(performance.now() - started) } };
-  }
+  const text = JSON.stringify({
+    case_id: testCase.id, expected_route: testCase.expected.route, expected_outcome: testCase.expected.outcome,
+    expected_facts: testCase.expected.facts ?? [], forbidden_facts: (testCase.expected.forbiddenFacts ?? []).map(group => group.map(safe)),
+    supporting_passage_labels: testCase.expected.retrieval?.supportingLabels ?? [],
+    expected_lookup: testCase.expected.lookup ? { must_run: testCase.expected.lookup.mustRun,
+      order_ids: testCase.expected.lookup.mustReturnOrderIds ?? [], no_foreign_order_ids: true } : null,
+    expected_memory: testCase.expected.memory ? { enabled: testCase.expected.memory.enabled,
+      personalization_expected: Boolean(testCase.expected.memory.requiresPersonalization), sensitive_memory_forbidden: testCase.id === 'MEM-04' } : null,
+    prompt: safe(testCase.message.replaceAll('type 2 diabetes', '[synthetic sensitive health statement]')), reply: safe(scored.observedReply),
+    observed_route: scored.observedRoute, observed_outcome: scored.observedOutcome, citations: scored.observedCitations,
+    retrieved_labels: scored.retrieval?.selected?.flatMap(item => item.labels) ?? [], lookup: scored.observedLookupSummary,
+    security_checked: scored.securityChecked, response_schema: judgeSchema,
+    answer_format: 'Put the verdict object matching response_schema, as JSON text, in the reply.'
+  });
+  if (text.length > 2000) return { verdict: 'pending', reasonCodes: [], error: 'judge input exceeds the 2000-character message limit', attempts: [] };
+  if (mode === 'fixture') await script('', [textOutput({ outcome: 'reply', reply: JSON.stringify({ verdict: 'pass', reason_codes: ['good_response'] }) })]);
+  const preview = `/api/businesses/${businessRecord.id}/preview`;
+  const created = await businessRecord.owner(preview, {});
+  if (created.status !== 201) throw new Error(`Judge preview could not start (${created.status})`);
+  const id = created.data.conversation.id;
+  const sent = await businessRecord.owner(`${preview}/${id}/messages`, { client_submission_id: `issue36-judge-${randomUUID()}`, text });
+  if (sent.status !== 202) throw new Error(`Judge preview message failed (${sent.status})`);
+  const turn = await settled(async () => (await businessRecord.owner(`${preview}/${id}`)).data, sent.data.message.id);
+  const trace = await businessRecord.owner(`/api/businesses/${businessRecord.id}/traces/${id}`);
+  if (trace.status !== 200) throw new Error(`Judge preview trace unavailable for ${testCase.id}`);
+  const attempts = traceAttempts(trace.data, mode === 'connected').map(attempt => ({ ...attempt, operation: 'judge' }));
+  let parsed = null;
+  try { parsed = JSON.parse(turn.replies.find(message => message.author === 'assistant')?.text ?? 'null'); } catch {}
+  const codes = judgeSchema.properties.reason_codes.items.enum;
+  if (parsed && Object.keys(parsed).length === 2 && ['pass', 'fail'].includes(parsed.verdict) && Array.isArray(parsed.reason_codes) &&
+      parsed.reason_codes.every(code => codes.includes(code))) return { verdict: parsed.verdict, reasonCodes: parsed.reason_codes, attempts };
+  return { verdict: 'pending', reasonCodes: [], error: 'judge reply missing or off-schema', attempts };
 }
 
-function ownerSession() {
-  let cookie = '';
-  const owner = async (path, body, options = {}) => {
-    const response = await fetch(`${base}${path}`, { method: body === undefined ? 'GET' : 'POST', redirect: 'manual',
-      headers: { origin: base, cookie, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...options.headers },
-      body: body === undefined ? undefined : JSON.stringify(body) });
-    const cookies = response.headers.getSetCookie();
-    if (cookies.length) cookie = cookies.map(value => value.split(';')[0]).join('; ');
-    return { status: response.status, data: await response.json().catch(() => null), headers: response.headers };
-  };
-  Object.defineProperty(owner, 'cookie', { get: () => cookie });
-  owner.request = owner;
-  return owner;
+async function settled(read, messageId) {
+  for (let attempt = 0; attempt < 240; attempt++) {
+    const conversation = await read();
+    const current = conversation.messages.find(item => item.id === messageId);
+    if (current && !['queued', 'running'].includes(current.turn_state)) {
+      return { message: current, conversation, replies: conversation.messages.filter(item => item.reply_to === current.id) };
+    }
+    await wait(250);
+  }
+  throw new Error(`Turn did not settle for message ${messageId}`);
 }
 
 async function ownerBusiness() {
   const email = process.env.SEED_OWNER_EMAIL ?? (has('fixture') ? 'demo-owner@example.test' : null);
   const password = process.env.SEED_OWNER_PASSWORD ?? (has('fixture') ? 'Demo-owner-password-35!' : null);
   if (!email || !password) throw new Error('Set SEED_OWNER_EMAIL and SEED_OWNER_PASSWORD for the seeded demo Owner');
-  const owner = ownerSession();
+  const owner = await client();
   const login = await limited(() => owner('/api/auth/sign-in/email', { email, password }));
   if (login.status !== 200) throw new Error(`Seeded demo Owner sign-in failed (${login.status})`);
+  // The shape of tests/helpers.mjs operators, whose helpers this runner reuses.
+  Object.assign(owner, { request: owner, cookie: login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') });
   const listing = await owner('/api/businesses');
   if (listing.status !== 200) throw new Error(`Business listing failed (${listing.status})`);
   const business = listing.data.find(item => item.name === 'Northwind Kettles' && item.role === 'Owner');
@@ -290,7 +285,7 @@ async function ownerBusiness() {
 
 async function bootstrapFixtureDemo() {
   const credentials = { email: 'demo-owner@example.test', password: 'Demo-owner-password-35!' };
-  const owner = ownerSession();
+  const owner = await client();
   let signedIn = await limited(() => owner('/api/auth/sign-in/email', credentials));
   if (signedIn.status === 401) {
     const signup = await limited(() => owner('/api/auth/sign-up/email', { name: 'Northwind demo owner', ...credentials }));
@@ -310,10 +305,6 @@ async function bootstrapFixtureDemo() {
   } catch (error) {
     throw new Error(`Fixture Northwind seed failed (${error.status ?? 'docker error'}); check isolated Compose readiness`);
   }
-}
-
-function setEvalConfiguration(baseline) {
-  return evaluationConfiguration(baseline);
 }
 
 async function signDemoAssertion(businessId, customerId, shop) {
@@ -349,22 +340,16 @@ async function demoCustomer(businessRecord, customerName) {
   session.ask = async message => {
     const sent = await chat(`/conversations/${id}/messages`, { client_submission_id: `issue36-${randomUUID()}`, text: message }, token);
     if (sent.status !== 202) throw new Error(`Customer message submission failed (${sent.status})`);
-    for (let attempt = 0; attempt < 240; attempt++) {
+    return settled(async () => {
       const read = await chat(`/conversations/${id}`, undefined, token);
       if (read.status !== 200) throw new Error(`Customer conversation read failed (${read.status})`);
-      const current = read.data.messages.find(item => item.id === sent.data.message.id);
-      if (current && !['queued', 'running'].includes(current.turn_state)) {
-        return { message: current, conversation: read.data,
-          replies: read.data.messages.filter(item => item.reply_to === current.id) };
-      }
-      await wait(250);
-    }
-    throw new Error(`Customer turn did not settle for ${id}`);
+      return read.data;
+    }, sent.data.message.id);
   };
   return session;
 }
 
-async function executeCase(testCase, businessRecord, mode, index, runId, secretValues, extractionExpected) {
+async function executeCase(testCase, businessRecord, mode, index, extractionExpected) {
   const session = await demoCustomer(businessRecord, testCase.customer);
   const useMemoryCustomer = testCase.category === 'memory';
   if (useMemoryCustomer) await applyMemorySetup(testCase, session);
@@ -381,19 +366,11 @@ async function executeCase(testCase, businessRecord, mode, index, runId, secretV
   const trace = traceResponse.data;
   const replies = turn.replies.filter(message => message.author === 'assistant').map(message => ({ author: message.author, text: message.text, citations: message.citations ?? [] }));
   const lookups = detailResponse.data.lookups ?? [];
-  const providerLogs = mode === 'fixture' ? [...await calls(''), ...await calls('@jev')]
-    .filter(log => JSON.stringify(log.body ?? {}).includes(testCase.message)) : [];
   const replyText = replies.map(message => message.text).join('\n');
-  const security = securityObservation(testCase, replyText, providerLogs, lookups, state, businessRecord.secret, trace, mode === 'connected');
-  const scored = scoreCase(testCase, { trace, replies, lookups, controlState: turn.conversation.control_state,
+  const security = securityObservation(testCase, replyText, lookups, state, businessRecord.secret);
+  return scoreCase(testCase, { trace, replies, lookups, controlState: turn.conversation.control_state,
     memoryCheck: useMemoryCustomer ? memoryPass(testCase, state, replyText) : false,
     security, connected: mode === 'connected', latencyPhase: index === 0 ? 'cold' : 'warm', turnLatencyMs }, passages);
-  if (mode === 'connected') {
-    const judged = await judgeCase(testCase, scored, secretValues);
-    scored.llmJudge = { verdict: judged.verdict, reasonCodes: judged.reasonCodes };
-    if (judged.attempt) scored.attempts.push(judged.attempt);
-  }
-  return scored;
 }
 
 async function ready(mode) {
@@ -401,12 +378,9 @@ async function ready(mode) {
   if (!response.ok) throw new Error('Application readiness check failed');
   const value = await response.json();
   if (!String(value.knowledge).startsWith('available')) throw new Error('Pinned embedding model is unavailable');
-  if (mode === 'connected' && (!process.env.DEEPSEEK_API_KEY || !process.env.TYPESAFE_API_KEY)) {
-    throw new Error('Connected mode requires DEEPSEEK_API_KEY and TYPESAFE_API_KEY in the runner environment');
-  }
   const generation = value.generation ?? {};
   const configured = provider => String(generation[provider]?.key ?? '').startsWith('configured');
-  if (mode === 'connected' && (!configured('deepseek') || !configured('jev'))) throw new Error('Connected providers are not configured in the worker');
+  if (mode === 'connected' && (!configured('deepseek') || !configured('jev'))) throw new Error('Connected mode requires DEEPSEEK_API_KEY and TYPESAFE_API_KEY in the worker');
   return { deepseek: { configured: configured('deepseek') }, qwen: { configured: configured('qwen') }, jev: { configured: configured('jev') }, embedding: value.knowledge };
 }
 
@@ -447,6 +421,7 @@ async function run() {
   const createdRefs = new Set();
   let results = [];
   let savedConfig = null;
+  let judgeConfig = null;
   let runError = null;
   const cleanupIssues = [];
   const cleanupEvidence = [];
@@ -476,7 +451,7 @@ async function run() {
       await granted('qwen', 'extraction');
     }
     configAttempted = true;
-    const changed = await publish(businessRecord, setEvalConfiguration(businessRecord.baseline));
+    const changed = await publish(businessRecord, evaluationConfiguration(businessRecord.baseline));
     const published = await businessRecord.owner(`/api/businesses/${businessRecord.id}/configuration/versions/${changed}`);
     if (published.status !== 200) throw new Error('Published evaluation configuration could not be read back');
     savedConfig = { version: changed, document: published.data.document };
@@ -485,9 +460,20 @@ async function run() {
       const testCase = selected[index];
       const extractionExpected = extractionEnabled || testCase.id === 'MEM-01';
       if (testCase.category === 'memory') memoryTouched = true;
-      results.push(await executeCase(testCase, businessRecord, mode, index, runId, secretValues, extractionExpected));
+      results.push(await executeCase(testCase, businessRecord, mode, index, extractionExpected));
       if (testCase.id === 'MEM-01') extractionEnabled = true;
       process.stdout.write(`Recorded ${testCase.id} (${mode})\n`);
+    }
+    // Customer conversations stay pinned to the evaluation version; the judge's previews pin its own.
+    const judgeVersion = await publish(businessRecord, judgeConfiguration());
+    const judgeRead = await businessRecord.owner(`/api/businesses/${businessRecord.id}/configuration/versions/${judgeVersion}`);
+    if (judgeRead.status !== 200) throw new Error('Published judge configuration could not be read back');
+    judgeConfig = { version: judgeVersion, sha256: sha256(JSON.stringify(judgeRead.data.document, null, 2)) };
+    for (const scored of results) {
+      const judged = await judgeCase(corpus.cases.find(testCase => testCase.id === scored.caseId), scored, businessRecord, mode, secretValues);
+      scored.llmJudge = { verdict: judged.verdict, reasonCodes: judged.reasonCodes, ...(judged.error ? { error: judged.error } : {}) };
+      scored.attempts.push(...judged.attempts);
+      process.stdout.write(`Judged ${scored.caseId} (${mode})\n`);
     }
   } catch (error) {
     runError = redact(error?.message ?? 'Evaluation stopped before all cases completed', secretValues);
@@ -520,7 +506,7 @@ async function run() {
   }
   const endedAt = new Date().toISOString();
   const gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
-  const sourceFiles = ['app/traces.ts', 'worker/worker.py', 'tests/traces.test.mjs', 'demo/server.mjs', 'evaluation/portfolio-v1/run.mjs',
+  const sourceFiles = ['app/traces.ts', 'worker/worker.py', 'worker/memory.py', 'tests/traces.test.mjs', 'demo/server.mjs', 'evaluation/portfolio-v1/run.mjs',
     'evaluation/portfolio-v1/core.mjs', 'evaluation/portfolio-v1/core.test.mjs', 'evaluation/portfolio-v1/manifest.v1.json'];
   const sourceTreeSha256 = sha256(JSON.stringify(sourceFiles.map(path => [path, sha256(readFileSync(join(root, path)))])));
   const command = `node --env-file=.env evaluation/portfolio-v1/run.mjs ${mode === 'fixture' ? '--fixture' : '--connected'}${caseFilter ? ` --case=${caseFilter}` : ''}`;
@@ -529,6 +515,7 @@ async function run() {
     configSha256: savedConfig ? sha256(JSON.stringify(savedConfig.document, null, 2)) : null, providerAvailability: readiness,
     secrets: secretValues });
   built.report.runtime.command = command;
+  built.report.runtime.judgeConfiguration = judgeConfig;
   built.report.runtime.startedAt = startedAt;
   built.report.runtime.finishedAt = endedAt;
   built.report.runtime.embeddingRevision = corpus.runtime_versions.embedding.revision;

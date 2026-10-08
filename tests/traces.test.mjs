@@ -21,10 +21,12 @@ const traceOf=async(b,id,who=b.owner)=>(await who.request(`${paths(b).traces}/${
 const untimed=turn=>({...turn,created_at:undefined,steps:turn.steps.map(({started_at,finished_at,...s})=>s),
   attempts:turn.attempts.map(({started_at,finished_at,...a})=>a)});
 const timed=turn=>[...turn.steps,...turn.attempts].every(x=>x.started_at&&x.finished_at&&new Date(x.finished_at)>=new Date(x.started_at));
+// The worker's value-free attestation that a provider payload held no credential of the Business and no provider key.
+const checked={checked:true,credential_refs:['orders-key'],provider_keys:['deepseek','jev','qwen'],credential_exposed:false,provider_key_exposed:false};
 const generation=(step_ordinal,step_id,extra={})=>({step_ordinal,step_id,kind:'provider',target:'deepseek/deepseek-flash',operation:'generation',status:'succeeded',
-  error:null,fallback:false,served_model:'deepseek-flash',prompt_tokens:1000,completion_tokens:100,cost_usd:0.0007,...extra});
+  error:null,fallback:false,served_model:'deepseek-flash',prompt_tokens:1000,completion_tokens:100,cost_usd:0.0007,payload_check:checked,...extra});
 const jev={kind:'provider',target:'jev/jev-latest',operation:'decision',status:'succeeded',error:null,fallback:false,served_model:'jev-1.13.0',
-  prompt_tokens:376,completion_tokens:56,cost_usd:0.00001579};
+  prompt_tokens:376,completion_tokens:56,cost_usd:0.00001579,payload_check:checked};
 // An Owner preview conversation, driven through the Operator API.
 async function preview(b) {
   const created=await b.owner.request(paths(b).preview,{});
@@ -218,7 +220,7 @@ test('Traces: a Customer turn shows its decision, lookup and generations with us
       {ordinal:2,step_id:'status',type:'agent',status:'succeeded',output:'reply',error:null,detail:{agent:'status',lookups:[{action:'lookup',fields:['status']}],citations:[]}}],
     attempts:[{...jev,step_ordinal:1,step_id:'triage'},generation(2,'status'),
       {step_ordinal:2,step_id:'status',kind:'http',target:'lookup',operation:null,status:'succeeded',error:null,fallback:false,served_model:null,
-        prompt_tokens:null,completion_tokens:null,cost_usd:null},generation(2,'status')]});
+        prompt_tokens:null,completion_tokens:null,cost_usd:null,payload_check:null},generation(2,'status')]});
   assert(timed(trace.turns[0]));
   // Redaction: no credential, provider key, Customer identity, message, input, result value or reply text.
   const text=JSON.stringify(trace);

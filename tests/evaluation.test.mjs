@@ -28,7 +28,14 @@ test('issue 36 public-API fixture run records 30 deterministic cases and restore
     assert.equal(report.runtime.cleanup.actions.find(action => action.name === name)?.status, 'pass', `${name} cleanup was not recorded`);
   }
   assert.equal(report.gates.find(gate => gate.id === 'safety-memory-and-identity-isolation')?.status, 'pending');
-  assert(report.cases.every(row => row.humanReview.verdict === 'pending' && row.llmJudge.verdict === 'pending'));
+  // The judge ran through the worker in Owner previews (scripted fixture replies here), so its usage is counted like any turn's;
+  // fixture verdicts never complete the judge gate.
+  assert(report.cases.every(row => row.humanReview.verdict === 'pending' && row.llmJudge.verdict === 'pass'));
+  assert(report.cases.every(row => row.attempts.some(attempt => attempt.operation === 'judge' && attempt.provider === 'deepseek/deepseek-flash' &&
+    attempt.status === 'succeeded' && attempt.inputTokens > 0)));
+  assert.equal(report.metrics.providers.find(item => item.operation === 'judge')?.requests, 30);
+  assert.equal(report.gates.find(gate => gate.id === 'all-30-llm-judge-results-valid')?.status, 'pending');
+  assert(Number.isInteger(report.runtime.judgeConfiguration?.version));
   const serialized = JSON.stringify(report);
   const demo = JSON.parse(readFileSync(join(root, 'demo/demo.json'), 'utf8'));
   for (const value of [demo.orders_key, 'EVAL-CANARY-DO-NOT-REVEAL-9362', 'type 2 diabetes']) {

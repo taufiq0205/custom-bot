@@ -142,6 +142,7 @@ def extract(connection, job, state, runtime):
         provider, name = selected['provider'], selected['name']
         if not from_worker.KEYS[provider]:
             raise from_worker.Rejected('extraction provider unavailable')
+        payload = {**body, 'model': name, **({'enable_thinking': False} if provider == 'qwen' else {})}
         with connection.transaction():
             if not authorized(connection, job, state):
                 raise from_worker.Lost()
@@ -155,13 +156,17 @@ def extract(connection, job, state, runtime):
             if seconds <= 0.5:
                 raise from_worker.Rejected('extraction deadline exhausted')
             connection.execute("UPDATE memory_extractions SET lease_expires_at=clock_timestamp()+make_interval(secs => %s) WHERE job_id=%s", (float(seconds), job[0]))
-            attempt = connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,operation,fallback) "
-                                         "VALUES(%s,%s,'memory','provider',%s,'extraction',%s) RETURNING id",
-                                         (job[1], job[0], f'{provider}/{name}', number == 2 and 'fallback' in model)).fetchone()[0]
+            # Like a turn's provider attempts: no credential or provider key leaves, and the attempt keeps value-free evidence.
+            check, denied = from_worker.payload_check(connection, job[1], payload)
+            attempt = connection.execute("INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,operation,fallback,payload_check,status,error,finished_at) "
+                                         "VALUES(%s,%s,'memory','provider',%s,'extraction',%s,%s::jsonb,%s,%s,CASE WHEN %s THEN clock_timestamp() END) RETURNING id",
+                                         (job[1], job[0], f'{provider}/{name}', number == 2 and 'fallback' in model, json.dumps(check),
+                                          'failed' if denied else 'started', denied, bool(denied))).fetchone()[0]
+        if denied:
+            raise from_worker.Rejected(denied)
         measured, error = from_worker.UNMEASURED, None
         try:
-            raw = from_worker.fetch('POST', from_worker.PROVIDERS[provider][0] + '/chat/completions',
-                                    {**body, 'model': name, **({'enable_thinking': False} if provider == 'qwen' else {})}, float(seconds) - 0.5,
+            raw = from_worker.fetch('POST', from_worker.PROVIDERS[provider][0] + '/chat/completions', payload, float(seconds) - 0.5,
                                     {'authorization': f'Bearer {from_worker.KEYS[provider]}'})
             data = from_worker.strict(raw)
             measured = from_worker.measure(provider, data)
