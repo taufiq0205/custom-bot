@@ -70,3 +70,7 @@ The app handles accounts, configuration and the inbox. Each customer message bec
 ## Status
 
 A portfolio project that runs locally. It is not a production deployment: hosting would still need HTTPS ingress, real email, secret management, backups and monitoring. Planned work is tracked in [issues](https://github.com/taufiq0205/custom-bot/issues).
+
+## License
+
+[MIT](LICENSE)
