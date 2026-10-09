@@ -1,8 +1,8 @@
 # Issue #36 validation
 
-The evaluation harness uses the seeded Northwind Kettles Business through public Owner and Customer APIs. The cases, expected passage fingerprints, fixture replies, pricing snapshot, judge prompt and schema are versioned and checksum-verified. Review them in [`evaluation/portfolio-v1/corpus-review.md`](../evaluation/portfolio-v1/corpus-review.md).
+The evaluation harness uses the seeded Northwind Kettles Business through public Owner and Customer APIs. The cases, expected passage fingerprints, fixture replies, pricing snapshot, judge prompt and schema are versioned and checksum-verified. Review them in [`evaluation/portfolio-v1/corpus-review.md`](../../evaluation/portfolio-v1/corpus-review.md).
 
-The latest isolated fixture run, from commit `91c4213`, is [Markdown](../evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.md), [JSON](../evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json) and its [SHA-256 sidecar](../evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json.sha256). Its `workingTree.dirty` is true only because of an untracked `node_modules` symlink. Results:
+The latest isolated fixture run, from commit `91c4213`, is [Markdown](../../evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.md), [JSON](../../evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json) and its [SHA-256 sidecar](../../evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json.sha256). Its `workingTree.dirty` is true only because of an untracked `node_modules` symlink. Results:
 - All 30 cases recorded, with 30/30 deterministic passes.
 - Every case's provider attempts carried the worker's payload attestation, including 7 memory extractions; the 4 memory cases each had an attested extraction.
 - 30 judge previews ran through the worker with scripted replies, which were parsed and left `pending`.

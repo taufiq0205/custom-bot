@@ -1,6 +1,6 @@
 # Redesign notes: visual and developer configuration prototype
 
-Dated 2026-10-01. This follows [DESIGN-HANDOFF.md](./DESIGN-HANDOFF.md). The user formally validated the design in the original Wayfinder discussion: "Validated the design: REDESIGN-NOTES.md and screenshots". These notes and screenshots are the accepted design evidence for [Prototype the visual and developer configuration views](https://github.com/taufiq0205/custom-bot/issues/7). The earlier hold on resolution and artifact capture is superseded by that validation. Application implementation and deployment remain separate work.
+Dated 2026-10-01. This follows [DESIGN-HANDOFF.md](DESIGN-HANDOFF.md). The user formally validated the design in the original Wayfinder discussion: "Validated the design: REDESIGN-NOTES.md and screenshots". These notes and screenshots are the accepted design evidence for [Prototype the visual and developer configuration views](https://github.com/taufiq0205/custom-bot/issues/7). The earlier hold on resolution and artifact capture is superseded by that validation. Application implementation and deployment remain separate work.
 
 ## Files
 

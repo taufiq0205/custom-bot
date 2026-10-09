@@ -8,8 +8,8 @@ Work in `/Users/mtaufiq456/Documents/personal/projects/custom-bot`. Keep communi
 
 ## Read first
 
-- [Current prototype](./prototype-configuration.html): self-contained HTML with in-memory state. Double-click to run; reload resets everything. `?check=1` runs a small embedded validation check when opened through a URL.
-- [Domain glossary](./CONTEXT.md): use Operator, Business, Owner, Support, Customer memory, Configuration draft, and Execution trace consistently.
+- [Current prototype](prototype-configuration.html): self-contained HTML with in-memory state. Double-click to run; reload resets everything. `?check=1` runs a small embedded validation check when opened through a URL.
+- [Domain glossary](../../CONTEXT.md): use Operator, Business, Owner, Support, Customer memory, Configuration draft, and Execution trace consistently.
 - [Prototype the visual and developer configuration views](https://github.com/taufiq0205/custom-bot/issues/7): open decision, claimed by `taufiq0205` during this discussion.
 - [Plan the customizable customer-service agent platform](https://github.com/taufiq0205/custom-bot/issues/1): canonical planning map. Refresh live issue state if needed; this handoff is dated 2026-10-01.
 - [Define agent and workflow execution behavior](https://github.com/taufiq0205/custom-bot/issues/3#issuecomment-5924018922): accepted execution/publication rules if a redesign affects behavior.

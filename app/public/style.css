@@ -1,4 +1,4 @@
-/* Operator app, following the validated configuration prototype (prototype-configuration.html): dark rail and top bar,
+/* Operator app, following the validated configuration prototype (docs/design-archive/prototype-configuration.html): dark rail and top bar,
    warm grey canvas, teal accent, system fonts. */
 :root{
  --ink:#0e1419;--ink-2:#17202a;--ink-3:#222d38;--ink-line:#2b3743;--ink-text:#c6d0d8;--ink-muted:#7f8c97;
