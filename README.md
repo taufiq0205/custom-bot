@@ -2,7 +2,11 @@
 
 A self-hosted platform for building customer-service AI agents. A business designs its agent as a visual workflow, grounds answers in its own documents and website, looks up live order data safely, and hands conversations to human support when the agent should not answer.
 
-<!-- TODO: hero screenshot or GIF of the workflow editor and an execution trace -->
+![Workflow editor with a preview chat and its execution trace](docs/images/workflow-and-trace.png)
+
+<p align="center"><img src="docs/images/support-inbox.png" width="49%" alt="Shared support inbox with a handed-off conversation"> <img src="docs/images/knowledge.png" width="49%" alt="Knowledge sources: documents and a crawled help site"></p>
+
+<sub>Screenshots from the seeded Northwind Kettles demo in simulation mode.</sub>
 
 ## Highlights
 
