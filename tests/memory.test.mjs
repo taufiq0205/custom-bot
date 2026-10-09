@@ -328,6 +328,22 @@ test('a blank extraction reply, which DeepSeek documents as occasional, gets the
  assert.equal((await calls(key)).length,3);
 });
 
+test('extraction refuses a payload holding a credential stored while the turn ran; every attempt attests its check value-free',async()=>{
+ const {b,key,c}=await setup('memory-payload');await enable(c);await script(key,[{...answer,delay:0.5}]);
+ const secret=`LATE-${crypto.randomUUID()}`,msg=await c.send(`Please call me Ada ${secret}`);await inflight(key,1);
+ assert.equal((await b.owner.request(b.controls('credentials'),{ref:'late-key',origin:'https://orders.fixture.test',header:'x-api-key',secret})).status,200);
+ assert.equal((await settled(c)).extraction.status,'failed');
+ // Service was delivered; the refused save is reported visibly.
+ assert.deepEqual((await c.read()).messages.filter(m=>m.reply_to===msg.id).map(m=>m.author),['assistant','system']);
+ assert.equal((await calls(key)).length,1);
+ const trace=(await b.owner.request(`/api/businesses/${b.id}/traces/${c.conversation.id}`)).data;
+ // The turn's attempts include its extraction's; the extraction lists its own again.
+ assert.deepEqual(trace.turns[0].attempts.map(a=>[a.operation,a.status,a.payload_check.credential_refs,a.payload_check.credential_exposed]),
+   [['generation','succeeded',['orders-key'],false],['extraction','failed',['late-key','orders-key'],true]]);
+ assert.deepEqual(trace.extractions[0].attempts.map(a=>[a.status,a.payload_check.credential_exposed]),[['failed',true]]);
+ assert.equal(JSON.stringify(trace).includes(secret),false);
+});
+
 test('alternative preferred names require clarification even with a literally matching provider value',async()=>{
  const {key,c}=await setup('memory-name-choice');await enable(c);await script(key,[{...answer,delay:0.2}]);
  const text='Please call me Ada or Grace',msg=await c.send(text);await inflight(key,1);await script(key,[extracted(msg,'preferred_name','Ada or Grace',text)]);await c.settle(msg);

@@ -148,7 +148,7 @@ test('Demo service: labelled in readiness; only local or test mode with exactly 
     assert.match(source.latest.error,/not permitted/);
   } finally {execFileSync('docker',['rm','-f',bare],{stdio:'ignore'});compose('start','worker');}
   for(let i=0;i<80&&!(await health().catch(()=>({}))).demo;i++)await wait(250);
-  assert.equal(execFileSync('docker',['ps','--format','{{.Names}}'],{encoding:'utf8'}).split('\n').filter(n=>/custom-bot-worker/.test(n)).length,1);
+  assert.equal(compose('ps','--format','{{.Service}}').split('\n').filter(n=>n==='worker').length,1);
   // With another CA (the fixture's, which every other test host uses), the demo certificate is rejected: only the demo CA verifies it.
   compose('stop','worker');
   const wrongCa=compose('run','-d','--no-deps','-e','DEMO_CA_FILE=/fixture/cert.pem','worker').trim();

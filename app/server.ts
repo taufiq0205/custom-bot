@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { auth, mail } from './auth.js';
-import { origin, pool } from './config.js';
+import { mode, origin, pool } from './config.js';
 import { memberships } from './memberships.js';
 import { chat } from './chat.js';
 import { configuration } from './configuration.js';
@@ -28,7 +28,8 @@ createServer(async (req,res) => {
         if (!worker.rowCount) return json(503,{error:'Worker unavailable; inspect worker service logs'});
         await pool.query('SELECT 1 FROM businesses LIMIT 1');
         await mail.verify();
-        return json(200,{status:'ready', app:'ok', database:'ok', worker:'ok', mail:'ok', knowledge:worker.rows[0].knowledge,
+        // mode: test means fixture transport may stand in for providers, so no output is real provider evidence.
+        return json(200,{status:'ready', mode, app:'ok', database:'ok', worker:'ok', mail:'ok', knowledge:worker.rows[0].knowledge,
           // Provider keys live only in the worker; it reports their presence and endpoints, never values or unmeasured access.
           generation:{simulation:'always available, labelled as simulated', ...worker.rows[0].generation},
           // The bundled portfolio demo service, when the worker has it enabled (local only).

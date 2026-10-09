@@ -26,7 +26,9 @@ https({key: read('key.pem'), cert: read('cert.pem')}, (req, res) => {
     return json(res, 200, {customer_id: customer, orders: orders.filter(o => o.customer_id === customer && (!id || o.order_id === id))
       .map(({customer_id, ...order}) => order)});
   }
-  const file = url.pathname === '/robots.txt' ? 'robots.txt' : /^\/help\/([a-z]+\.html)?$/.exec(url.pathname) && `help/${url.pathname.slice(6) || 'index.html'}`;
+  const evaluationPages = {'/eval-conflict/': 'help/standard-delivery.html', '/eval-injection/': 'help/eval-injection.html'};
+  const file = url.pathname === '/robots.txt' ? 'robots.txt' : evaluationPages[url.pathname] ??
+    (/^\/help\/([a-z-]+\.html)?$/.exec(url.pathname) && `help/${url.pathname.slice(6) || 'index.html'}`);
   if (req.method !== 'GET' || !file) return send(res, 404, 'text/plain', 'not found');
   send(res, 200, file.endsWith('.txt') ? 'text/plain' : 'text/html; charset=utf-8', read(`site/${file}`));
 }).listen(443);

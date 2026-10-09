@@ -118,6 +118,18 @@ A rerun creates only what is missing and prints `Already exists:` for the rest. 
 - **Start with no chat history in the shop.** Sign out, then clear the site data of `localhost:3300`.
 - **Wipe everything.** `docker compose down -v` deletes all local data: every Business, account and conversation, not only the demo's.
 
+## Portfolio evaluation (issue #36)
+
+The frozen 30-case Northwind suite is shown in the [review table](evaluation/portfolio-v1/corpus-review.md); the folder also contains a [corpus approval template](evaluation/portfolio-v1/corpus-approval.template.json) and [human review checklist](evaluation/portfolio-v1/HUMAN-REVIEW.md). The latest local fixture report is [Markdown](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.md) and [JSON](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json), with a [SHA-256 sidecar](evaluation/portfolio-v1/results/issue36-fixture-2026-10-08T18-28-27-623Z-87ee5b6a.json.sha256).
+
+| Latest run | Result |
+| --- | --- |
+| Local fixture, 30 cases | 30/30 deterministic assertions passed, each security case on the worker's payload attestation; cleanup passed. Judge previews ran with scripted fixture replies, so the LLM judge gate stays pending, as do human review and connected-provider gates. Fixture responses do not measure live model quality. |
+
+Run locally with `node --env-file=.env evaluation/portfolio-v1/run.mjs --fixture`. Evaluation requires Ada's demo memory to be disabled and empty, and the reserved `eval-conflict`, `eval-injection` and `eval-security` source refs to be unused. The runner refuses collisions and restores the published configuration, temporary sources, permissions and any evaluation memory it changed.
+
+For a connected run, review the corpus table, copy the approval template to `evaluation/portfolio-v1/corpus-approval.json`, and fill the reviewer, approval date and SHA-256 of `cases.v1.json` (`shasum -a 256 evaluation/portfolio-v1/cases.v1.json`). Configure `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY` in `.env` (optionally `DASHSCOPE_API_KEY` for Qwen), then start the connected demo stack with `docker compose -f compose.yaml -f compose.connected.yaml up --build -d --wait`. If Northwind is not seeded yet, use the connected seed command from Portfolio demo. Run `node --env-file=.env evaluation/portfolio-v1/run.mjs --connected`; it refuses until the approval digest matches. The runner holds no provider key (it drops any from its environment at startup) and refuses a stack in test mode, where the fixture answers as the providers. After the 30 Customer cases it publishes the frozen judge configuration (one DeepSeek agent whose instructions are `judge-prompt.v1.md`, its schema and a reply-format line; the report records that configuration's version and SHA-256) and asks it about each case in its own Owner preview, so the worker sends the judge's requests and its usage counts in the run cost. The baseline configuration is republished and the Owner's draft text restored afterwards, also when the run fails. Afterward, complete that run's `<run-id>.human-reviews.json` and finalize with `node evaluation/portfolio-v1/run.mjs --review=evaluation/portfolio-v1/results/<run-id>.json --human=evaluation/portfolio-v1/results/<run-id>.human-reviews.json`. Finalization verifies the unchanged report checksum and recorded connected provider traces, preserves the original run ID and result digest, and makes no provider call. Fixture replies cannot be finalized as connected evidence.
+
 ## Configuration (JSON)
 
 Each Business has one shared configuration draft and a series of immutable published versions. Owners select **Manage**, edit **Configuration JSON**, then **Save draft** or **Publish**. Support Operators and other Businesses get no editor and `404` from the API.
@@ -221,7 +233,7 @@ Current limits of this slice:
 
 Connected agents generate with DeepSeek at `https://api.deepseek.com` (an agent may also select a Qwen model directly, under Qwen's permission), and may name one Qwen fallback at exactly `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. Both use `POST …/chat/completions` in JSON mode. Qwen is sent `enable_thinking: false`, because its JSON mode does not support thinking.
 
-**Keys.** Set `DEEPSEEK_API_KEY` and `DASHSCOPE_API_KEY` (a Singapore/International Model Studio key) in `.env`. Only the worker receives them, and each is sent only to its own endpoint. No key value appears in the app container, API responses, configuration, prompts, attempt rows or logs. Without a key, a connected agent is unavailable: the turn fails visibly to support and nothing is sent. Simulation is unaffected.
+**Keys.** Set `DEEPSEEK_API_KEY` and `DASHSCOPE_API_KEY` (a Singapore/International Model Studio key) in `.env`. Only the worker receives them, and each is sent only to its own endpoint. No key value appears in the app container, API responses, configuration, prompts, attempt rows or logs. Before every generation, decision and extraction call, the worker checks the exact payload (each string, raw and once more JSON-escaped) for the Business's active action credentials and every provider key it holds, and refuses the call if one is present. Without a key, a connected agent is unavailable: the turn fails visibly to support and nothing is sent. Simulation is unaffected.
 
 **Egress.** The default launch keeps the worker on the internal network with no outbound access, so real calls need the connected overlay:
 
@@ -241,13 +253,14 @@ Like action controls, permissions are live and override pinned configuration ver
 
 **Processing scope.** Qwen's endpoint is Singapore for access and static storage. Inference may run anywhere in the world except Chinese mainland, so this is not Singapore-only processing. Readiness and the Cloud providers view say so.
 
-**Readiness and measurements.** `GET /health/ready` reports `generation`: simulation, and for each provider its endpoint, role and whether its key is configured. A configured key is reported as needing `compose.connected.yaml` for outbound calls, and as "account and model access not verified until a measured run", never as available. Each provider attempt records, value-free:
+**Readiness and measurements.** `GET /health/ready` reports the `mode` (`local`, `test` or `hosted`; in `test` the fixture may answer as the providers) and `generation`: simulation, and for each provider its endpoint, role and whether its key is configured. A configured key is reported as needing `compose.connected.yaml` for outbound calls, and as "account and model access not verified until a measured run", never as available. Each provider attempt records, value-free:
 - provider/model and operation;
 - whether it was the fallback;
 - status and error;
 - timing;
 - the model the provider reports serving;
 - prompt and completion tokens;
+- its `payload_check` (see Preview chat and execution traces);
 - an estimated cost.
 
 The worker logs one redacted line per attempt with the same data. Cost uses optional `PROVIDER_RATES`, JSON such as `{"deepseek/deepseek-flash":[0.5,2]}` (USD per million input and output tokens, keyed by the served model). Without a rate, no cost is estimated. The Owner trace view arrives with #27.
@@ -294,7 +307,7 @@ APIs (Owner of the Business only; Support, other Businesses and demoted Owners g
   - the pinned `configuration_version`, `mode` and `published_at`;
   - per turn, the job's `status` and `error`;
   - its `steps`: `ordinal`, `step_id`, `type`, `status`, `output`, `error`, `detail`, and the start and finish times;
-  - its `attempts`, each linked to its step by `step_ordinal`.
+  - its `attempts`, each linked to its step by `step_ordinal`, including its memory extraction's (also listed under `extractions`). Every provider attempt that could transfer data has a value-free `payload_check`: `checked`, the active `credential_refs` and configured `provider_keys` it was compared against, and whether a credential or provider key was found (`credential_exposed`, `provider_key_exposed`). A payload holding either is refused before transfer, and so is one whose credentials cannot be read.
 
 ## Knowledge (documents and websites)
 

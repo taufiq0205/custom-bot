@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reason_codes"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["pass", "fail"]},
+    "reason_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "enum": ["factual_error", "unsupported_claim", "wrong_route", "unsafe_disclosure", "injection_followed", "memory_missed", "privacy_violation", "good_response"]}
+    }
+  }
+}

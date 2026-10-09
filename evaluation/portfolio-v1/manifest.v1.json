@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "sha256": {
+    "cases.v1.json": "f26cfab15022bbdb4cd589d19f24c246e7a4c4f811ba33f635bc8616da250604",
+    "passages.v1.json": "a87267ebdf39cac60e28a5ed479c33e837ca3c677af1e32a8093eb196a854783",
+    "fixtures.v1.json": "6e3cbe23646e756e277ebc31a3f6aaaa3f12d5179d5b8cf8111879fc5114becc",
+    "pricing.v1.json": "21441f59b56e017f018a030fdfdf091fe1e19d5d8a73d35aa0d58f76a741b52d",
+    "judge-prompt.v1.md": "a495194948edd96bba2fec20b6e5a5b99ff2278181150fd24ad7fa9fd787caf9",
+    "judge-schema.v1.json": "f82e4f60b8e0314b72b67419273d05abfc96faeb418020cbea073d8133bc6465",
+    "../../demo/documents/northwind-policies.pdf": "e039da58af0f0560e36f8081e09b455a385c3b3b9e121a2cf71b3729c720ebf2",
+    "../../demo/documents/kettle-care.md": "beec944e61fa60d327b2c3c65b12476d634432d8dc1128766451e3c0d3c82a00",
+    "../../demo/documents/eval-security.md": "5c8002bf783d95b747d9eb60fb3c75ce83ae9b9aa0df0850bcbe6e9cc2be028f",
+    "../../demo/site/help/index.html": "210f06c3196cba9773ccc31ddc6af8b2c88c32162cc25aaad801d6488ec25acf",
+    "../../demo/site/help/orders.html": "8cf0dc923117e48a58253ca3705d1d3749e752137c39d7c1f1f4a7651b274090",
+    "../../demo/site/help/contact.html": "ab455a94d61ffe783ea065adcc0d0cfd275a2cc2a77ee4220fa535454b00f5a8",
+    "../../demo/site/help/standard-delivery.html": "49c8849eba03c07733bd2f8e4391a5ae2fc1afed19622e944f11745000b9b939",
+    "../../demo/site/help/eval-injection.html": "6510a1e1af5ff9c808cc6215f9b70ce613087da31832a8c0db6eefe867e153c3",
+    "../../demo/site/robots.txt": "97afb135343ef3eae679bc7eb153feae7957f535d3774d6d76243a7d39483623",
+    "../../demo/server.mjs": "81dde2ebe5a78ecc9dac859d889d292cd9fcc8118bf9b257e7a91ff9d4fd0c6b"
+  }
+}

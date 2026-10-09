@@ -331,3 +331,39 @@ test('Actions: credentials are encrypted with a key outside the database and nev
   assert.throws(()=>execFileSync('docker',['compose','-f','compose.yaml','run','--rm','--no-deps','-e','TEST_PUBLIC_HOSTS=internal.fixture.test','worker'],
     {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000}),e=>e.stderr.includes('test-only'));
 });
+
+test('Actions: a provider payload holding a credential or provider key is refused before transfer; every attempt attests its check value-free',async()=>{
+  // Quotes and backslashes: a lookup result reaches the provider as JSON text inside a message, so they are escaped twice.
+  const b=await business('actions-payload',{owner:await owner(),secret:`SENTINEL"q\\uote\\-${crypto.randomUUID()}`});
+  const key=`payload-${crypto.randomUUID()}`;
+  await publish(b,requested(key));
+  const provider=async c=>(await b.owner.request(`/api/businesses/${b.id}/traces/${c.conversation.id}`)).data.turns.at(-1).attempts.filter(a=>a.kind==='provider');
+  const check=(extra={})=>({checked:true,credential_refs:['orders-key'],provider_keys:['deepseek','jev','qwen'],credential_exposed:false,provider_key_exposed:false,...extra});
+  const sent=async()=>(await calls(`${key}.helper`)).length;
+  await script(`${key}.helper`,[ask,answer]);
+  await script(key,[owned({status:'shipped'})]);
+  const normal=await start(b);
+  assert.deepEqual((await normal.ask('Where is my order A-1?')).replies.map(m=>m.text),['Your order is on its way.']);
+  assert.deepEqual((await provider(normal)).map(a=>[a.status,a.payload_check]),[['succeeded',check()],['succeeded',check()]]);
+  // A lookup result echoing the credential: the generation that would carry it is refused and the turn goes to support.
+  await script(`${key}.helper`,[ask]);
+  await script(key,[owned({status:b.secret})]);
+  const echoed=await start(b),before=await sent();
+  assert.equal((await echoed.ask('Where is my order A-1?')).conversation.control_state,'waiting-for-support');
+  assert.equal(await sent(),before+1);
+  assert.deepEqual((await provider(echoed)).map(a=>[a.status,a.error,a.payload_check]),
+    [['succeeded',null,check()],['failed','private secret in provider payload',check({credential_exposed:true})]]);
+  // A Customer message holding the worker's provider key never leaves either.
+  const typed=await start(b);
+  assert.equal((await typed.ask('My key is test-deepseek-key-0000-synthetic')).conversation.control_state,'waiting-for-support');
+  assert.equal(await sent(),before+1);
+  assert.deepEqual((await provider(typed)).map(a=>[a.status,a.payload_check]),[['failed',check({provider_key_exposed:true})]]);
+  // A credential that cannot be read blocks the transfer: the check fails closed.
+  sql(`UPDATE action_credentials SET ciphertext='\\x00' WHERE business_id='${b.id}'`);
+  const unreadable=await start(b);
+  assert.equal((await unreadable.ask('Where is my order A-1?')).conversation.control_state,'waiting-for-support');
+  assert.equal(await sent(),before+1);
+  assert.deepEqual((await provider(unreadable)).map(a=>[a.status,a.error,a.payload_check.checked]),[['failed','provider payload check unavailable',false]]);
+  const evidence=JSON.stringify([(await calls(`${key}.helper`)).map(c=>c.body),...await Promise.all([normal,echoed,typed,unreadable].map(c=>b.owner.request(`/api/businesses/${b.id}/traces/${c.conversation.id}`)))]);
+  for(const value of [b.secret,JSON.stringify(b.secret).slice(1,-1),'test-deepseek-key'])assert.equal(evidence.includes(value),false,value);
+});

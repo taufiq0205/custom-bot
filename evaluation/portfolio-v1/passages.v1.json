@@ -1,0 +1,84 @@
+{
+  "version": "1.0.0",
+  "digestAlgorithm": "sha256",
+  "canonicalization": "UTF-8 passage text after whitespace collapse per line and newline join; source ingestion fixture is frozen with the corpus",
+  "labels": [
+    {
+      "id": "policy-return-window",
+      "source": "policies",
+      "document": "northwind-policies.pdf",
+      "page": 1,
+      "sha256": "b5af0cbbd42f40f8d862eb7d05217404fd106dd3838538a6d0e08aea84d60564"
+    },
+    {
+      "id": "policy-refund-time",
+      "source": "policies",
+      "document": "northwind-policies.pdf",
+      "page": 1,
+      "sha256": "b5af0cbbd42f40f8d862eb7d05217404fd106dd3838538a6d0e08aea84d60564"
+    },
+    {
+      "id": "policy-warranty-parts",
+      "source": "policies",
+      "document": "northwind-policies.pdf",
+      "page": 2,
+      "sha256": "8c0bda28c521c5b3dc3e985e15bcda9aa85df23be6f158fbea7eaea80ba79664"
+    },
+    {
+      "id": "policy-standard-delivery",
+      "source": "policies",
+      "document": "northwind-policies.pdf",
+      "page": 3,
+      "sha256": "6f5c5ed8fea29876183d6648ce0b6b6d183a78a1855bb4cb4ed494e898ebf1ea"
+    },
+    {
+      "id": "care-descaling",
+      "source": "care-guide",
+      "document": "kettle-care.md",
+      "page": null,
+      "sha256": "fcf130653156aa76a9b21cd73684e71944353ee00262da0ca51030b8f3fd68bf"
+    },
+    {
+      "id": "site-help-home",
+      "source": "help-centre",
+      "document": "https://northwind.demo.test/help/",
+      "page": null,
+      "sha256": "fdced681de31afe4f1bec1ed1ea4665af77419d5f46074f01d160c44c0bdbe62"
+    },
+    {
+      "id": "site-tracking",
+      "source": "help-centre",
+      "document": "https://northwind.demo.test/help/orders.html",
+      "page": null,
+      "sha256": "74dcf19ba72bc46b7859918270cef6418ff8e21e6b30d91c1f4618cce3e70c5d"
+    },
+    {
+      "id": "site-contact-hours",
+      "source": "help-centre",
+      "document": "https://northwind.demo.test/help/contact.html",
+      "page": null,
+      "sha256": "d70b6d453bd59c3ade554f84bcd5b4ac2b399955a18d5cd7b3b8776daece9761"
+    },
+    {
+      "id": "conflict-delivery",
+      "source": "eval-conflict",
+      "document": "https://northwind.demo.test/eval-conflict/",
+      "page": null,
+      "sha256": "4f7005af7e09aaee4cec84611d39ca4a90c1cefb805b80ae3634fe93ad0ecc09"
+    },
+    {
+      "id": "site-injection",
+      "source": "eval-injection",
+      "document": "https://northwind.demo.test/eval-injection/",
+      "page": null,
+      "sha256": "f6e5f3d0ef55ca4430f10d704014ea04c933a3a2d9e4e967262283f5e452a313"
+    },
+    {
+      "id": "doc-injection",
+      "source": "eval-security",
+      "document": "eval-security.md",
+      "page": null,
+      "sha256": "c4a1fe3212c52c5c7dc6c0407c9bc372af00d44326c36ae7fbc9cf746211b6aa"
+    }
+  ]
+}

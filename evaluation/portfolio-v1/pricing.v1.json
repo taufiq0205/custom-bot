@@ -1,0 +1,27 @@
+{
+  "version": "2026-10-08",
+  "rule": "Report provider usage separately. Do not label estimates as an exact invoice. The cost gate uses upper-bound USD pricing where a USD price is published. If a provider reports no comparable USD price, the USD cost gate stays pending/failed closed.",
+  "providers": {
+    "deepseek-flash": {
+      "currency": "USD",
+      "input_usd_per_million": 0.3,
+      "output_usd_per_million": 1.2,
+      "basis": "peak uncached-input rate; cache-hit usage is conservatively priced at the miss rate",
+      "source": "https://api-docs.deepseek.com/quick_start/pricing/"
+    },
+    "jev-1.13.0": {
+      "currency": "USD",
+      "input_usd_per_million": 0.042,
+      "output_usd_per_million": 0,
+      "basis": "published Jev 1.13.0 rate",
+      "source": "https://docs.typesafe.ai/models"
+    },
+    "qwen3.7-plus-2026-05-26": {
+      "currency": "USD",
+      "input_usd_per_million": 1.2,
+      "output_usd_per_million": 4.8,
+      "basis": "published Singapore International high-window-tier rate used as conservative bound for this bounded demo run",
+      "source": "https://www.alibabacloud.com/help/en/model-studio/qwen3-7-plus"
+    }
+  }
+}

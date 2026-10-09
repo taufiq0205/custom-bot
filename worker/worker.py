@@ -1,6 +1,7 @@
 """Durable turn worker: short transactional claims/transitions, bounded leases, no replay after interruption.
 Each turn runs its pinned published workflow within fixed budgets and the 60-second deadline."""
 import memory
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -274,11 +275,17 @@ def authorize(connection, job, action, secret=False):
         return grant
     if not CIPHER:
         return 'credential key not configured'
-    sealed = bytes(credential[2])
+    value = unseal(business, action['credential'], credential[2])
+    return 'credential unreadable' if value is None else {**grant, 'headers': {credential[1]: value}}
+
+
+def unseal(business, ref, ciphertext):
+    """A stored credential's secret, or None when it cannot be read."""
+    sealed = bytes(ciphertext or b'')
     try:
-        return {**grant, 'headers': {credential[1]: CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{action["credential"]}'.encode()).decode()}}
-    except InvalidTag:
-        return 'credential unreadable'
+        return CIPHER.decrypt(sealed[:12], sealed[12:], f'{business}/{ref}'.encode()).decode() if CIPHER and len(sealed) >= 28 else None
+    except (InvalidTag, ValueError):
+        return None
 
 
 def stale(connection, job, grants):
@@ -296,6 +303,42 @@ def withdrawn(connection, versions):
                               "AND (v.format<>'website' OR v.finished_at+interval '7 days'>memory_now(v.business_id,%s)) FOR SHARE OF s",
                               (list(versions), TESTING)).fetchall()
     return len(live) != len(versions)
+
+
+def payload_strings(value):
+    """Every key and string value in a JSON-like payload."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield str(k)
+            yield from payload_strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from payload_strings(v)
+
+
+def in_payload(payload, secret):
+    """Whether a secret appears in any payload string, raw or JSON-encoded once more (context and evidence are sent as
+    JSON text inside message strings, where quotes and backslashes are escaped)."""
+    forms = (secret, json.dumps(secret)[1:-1])
+    return any(form in text for text in payload_strings(payload) for form in forms)
+
+
+def payload_check(connection, business, payload):
+    """Before a provider transfer: whether the payload contains any of the Business's active action credentials or any provider
+    key this worker holds. Returns value-free evidence for the attempt record and the refusal reason, if any. A credential that
+    cannot be read, or a missing payload, blocks the transfer."""
+    rows = connection.execute('SELECT ref,ciphertext FROM action_credentials WHERE business_id=%s AND active ORDER BY ref',
+                              (business,)).fetchall()
+    check = {'checked': False, 'credential_refs': [ref for ref, _ in rows], 'provider_keys': sorted(p for p, k in KEYS.items() if k),
+             'credential_exposed': False, 'provider_key_exposed': False}
+    secrets = [unseal(business, ref, ciphertext) for ref, ciphertext in rows]
+    if payload is None or None in secrets:
+        return check, 'provider payload check unavailable'
+    check.update(checked=True, credential_exposed=any(in_payload(payload, s) for s in secrets if s),
+                 provider_key_exposed=any(in_payload(payload, k) for k in KEYS.values() if k))
+    return check, 'private secret in provider payload' if check['credential_exposed'] or check['provider_key_exposed'] else None
 
 
 def permitted(connection, business, provider, operation):
@@ -363,7 +406,7 @@ class Turn:
         # The best passages of each source, so a lower-priority source can never crowd a higher-priority one out of the evidence.
         # ponytail: exact scan of the Business's passages, no vector index; add a filtered HNSW index when a Business outgrows it.
         rows = self.connection.execute(
-            "SELECT id,version_id,ref,document,page,content FROM (SELECT c.id,c.version_id,s.ref,coalesce(c.url,v.document) AS document,c.page,c.content,"
+            "SELECT id,version_id,ordinal,ref,document,page,content FROM (SELECT c.id,c.version_id,c.ordinal,s.ref,coalesce(c.url,v.document) AS document,c.page,c.content,"
             "c.embedding <=> %s::vector AS distance,row_number() OVER (PARTITION BY c.source_id ORDER BY c.embedding <=> %s::vector) AS rank "
             "FROM source_chunks c JOIN knowledge_sources s ON s.id=c.source_id AND s.active_version_id=c.version_id "
             "JOIN source_versions v ON v.id=c.version_id WHERE c.business_id=%s AND s.business_id=%s AND s.deleted_at IS NULL "
@@ -373,9 +416,9 @@ class Turn:
         priority = {s['id']: s['priority'] for s in self.document.get('sources', [])}
         self.evidence = self.evidence or []
         seen, before = {e['chunk'] for e in self.evidence}, len(self.evidence)
-        for chunk, version, ref, document, page, text in rows:
+        for chunk, version, ordinal, ref, document, page, text in rows:
             if chunk not in seen:
-                self.evidence.append({'chunk': chunk, 'version_id': version, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
+                self.evidence.append({'chunk': chunk, 'version_id': version, 'ordinal': ordinal, 'id': f'E{len(self.evidence) + 1}', 'source': ref,
                                       'priority': priority[ref], 'document': document, 'page': page, 'text': text})
         # The trace references the passages this step added, never their text.
         self.detail['evidence'] = [reference(e) for e in self.evidence[before:]]
@@ -387,7 +430,7 @@ class Turn:
             raise Stop(EXHAUSTED, 'deadline reached')
         return remaining
 
-    def begin(self, step, kind, target, bound, action=None, permit=None, fallback=False):
+    def begin(self, step, kind, target, bound, action=None, permit=None, fallback=False, payload=None):
         """Revalidate the turn, its accepted results' controls (their facts are in the context this attempt may send), the
         provider permissions behind earlier outputs, and this attempt's action controls or provider permission; extend the lease
         to cover only this attempt, and record the attempt before it starts. Holds no transaction afterwards."""
@@ -408,14 +451,18 @@ class Turn:
                     # No transfer of Customer data without the Business's current permission for this provider and operation.
                     grant = permit and (permitted(self.connection, self.job[1], *permit) or f'{permit[0]} {permit[1]} not permitted')
                 denied = grant if isinstance(grant, str) else None
+                # No transfer of a credential or provider key, checked on the exact payload; the attempt keeps value-free evidence.
+                check = None
+                if not denied and permit:
+                    check, denied = payload_check(self.connection, self.job[1], payload)
                 if not denied:
                     self.connection.execute("UPDATE jobs SET lease_expires_at=least(greatest(lease_expires_at,clock_timestamp()+make_interval(secs => %s)),deadline) "
                                             "WHERE id=%s", (bound + 2, self.job[0]))
                 attempt = self.connection.execute(
-                    "INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation,fallback,step_ordinal) "
-                    "VALUES(%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN clock_timestamp() END,%s,%s,%s) RETURNING id",
+                    "INSERT INTO execution_attempts(business_id,job_id,step_id,kind,target,status,error,finished_at,operation,fallback,step_ordinal,payload_check) "
+                    "VALUES(%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN clock_timestamp() END,%s,%s,%s,%s::jsonb) RETURNING id",
                     (self.job[1], self.job[0], step, kind, target, 'failed' if denied else 'started', denied, bool(denied),
-                     permit and permit[1], fallback, self.steps)).fetchone()[0]
+                     permit and permit[1], fallback, self.steps, check and json.dumps(check))).fetchone()[0]
         # Raised after commit, so a visible session-ended failure recorded by current() is kept.
         if not held:
             raise Lost()
@@ -442,11 +489,11 @@ class Turn:
             if fallback:
                 raise Rejected(f'qwen fallback unavailable: {PROVIDERS[provider][1]} not set')
             raise Stop(UNAVAILABLE, f'generation unavailable: {PROVIDERS[provider][1]} not set')
+        payload = {**body, 'model': name, **({'enable_thinking': False} if provider == 'qwen' else {})}
         target, bound = f'{provider}/{name}', min(60, self.left())
-        attempt, revision = self.begin(step, 'provider', target, bound, permit=(provider, 'generation'), fallback=fallback)
+        attempt, revision = self.begin(step, 'provider', target, bound, permit=(provider, 'generation'), fallback=fallback, payload=payload)
         status, error, measured, recorded, started = 'failed', 'aborted', UNMEASURED, False, time.monotonic()
         try:
-            payload = {**body, 'model': name, **({'enable_thinking': False} if provider == 'qwen' else {})}
             # Lock waits above came out of the remaining time.
             raw = fetch('POST', PROVIDERS[provider][0] + '/chat/completions', payload, min(bound, self.left()),
                         {'authorization': f'Bearer {KEYS[provider]}'})
@@ -681,12 +728,12 @@ class Turn:
         """One bounded Jev attempt under the Business's live decision permission, sending only the Customer's message. Its answer
         is accepted only after validation and while the turn and that permission are unchanged. Logged value-free."""
         bound = min(HTTP_TIMEOUT, self.left())
-        attempt, revision = self.begin(step['id'], 'provider', target, bound, permit=('jev', 'decision'))
+        payload = {'model': target.split('/', 1)[1], 'state': {'customer_message': self.message},
+                   'questions': {'route': {'type': 'choice', 'instructions': step['question'], 'criteria': step['choices']},
+                                 'english': {'type': 'noul', 'instructions': ENGLISH}}}
+        attempt, revision = self.begin(step['id'], 'provider', target, bound, permit=('jev', 'decision'), payload=payload)
         status, error, measured, recorded, started = 'failed', 'aborted', UNMEASURED, False, time.monotonic()
         try:
-            payload = {'model': target.split('/', 1)[1], 'state': {'customer_message': self.message},
-                       'questions': {'route': {'type': 'choice', 'instructions': step['question'], 'criteria': step['choices']},
-                                     'english': {'type': 'noul', 'instructions': ENGLISH}}}
             raw = fetch('POST', PROVIDERS['jev'][0], payload, min(bound, self.left()), {'authorization': f'Bearer {KEYS["jev"]}'})
             try:
                 data = strict(raw)
@@ -793,8 +840,10 @@ class Turn:
 
 
 def reference(evidence):
-    """What a trace may show of a passage: where it came from, not what it says."""
-    return {k: evidence[k] for k in ('source', 'document', 'page')}
+    """Value-free passage identity for owner traces: source location and a content fingerprint, never the passage text."""
+    return {'source': evidence['source'], 'document': evidence['document'], 'page': evidence['page'],
+            'version_id': str(evidence['version_id']), 'ordinal': evidence['ordinal'],
+            'content_sha256': hashlib.sha256(evidence['text'].encode('utf-8')).hexdigest()}
 
 
 def literal(vector):
