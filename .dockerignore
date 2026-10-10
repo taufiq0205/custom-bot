@@ -2,8 +2,6 @@
 .env*
 node_modules
 dist
-screenshots
-research
 tests
 docs
 *.md

@@ -15,7 +15,7 @@ Environment (2026-10-04):
 
 ## Reproduce
 
-Requires this project's `.env`, free loopback ports 3100/8025/3199, and locked npm dependencies. The embedding model is optional in normal use (see [models.md](models.md)), but the test overlay always installs it. The first test launch therefore needs network access once, for the `models` service to download about 135 MB into the `models` volume. After that, nothing reaches the network: the worker runs on the internal network. No cloud credentials are used.
+Requires this project's `.env`, free loopback ports 3100/8025/3199, and locked npm dependencies. The embedding model is optional in normal use (see [models.md](../models.md)), but the test overlay always installs it. The first test launch therefore needs network access once, for the `models` service to download about 135 MB into the `models` volume. After that, nothing reaches the network: the worker runs on the internal network. No cloud credentials are used.
 
 ```sh
 npm ci --ignore-scripts
@@ -55,7 +55,7 @@ Results: maximum absolute difference 2.98e-7, cosine similarity 1.0000 for every
 
 - **Citations are validated, not required** (confirmed by the user). A reply may cite only passages that agent was shown, and the platform resolves them. A reply without citations is still delivered, because the platform cannot tell a factual knowledge answer from a clarification or an order-status reply. Whether factual answers actually cite is a model-quality property for the #33 evaluation.
 - **Explicit expiry** was added after review, at the user's request (`POST …/sources/:id/expire`). It differs from deletion: the source stays listed and becomes usable again with a new upload.
-- **The embedding model is optional,** at the user's request. It is no longer downloaded by default; `docker compose run --rm models` installs it. Without it, knowledge fails visibly and every other feature works. DeepSeek and TypeSafe offer no embedding API, so API keys cannot replace it (see [models.md](models.md)).
+- **The embedding model is optional,** at the user's request. It is no longer downloaded by default; `docker compose run --rm models` installs it. Without it, knowledge fails visibly and every other feature works. DeepSeek and TypeSafe offer no embedding API, so API keys cannot replace it (see [models.md](../models.md)).
 - **A replacement during a turn does not stop the reply.** The passages were active when retrieved, and the reply cites their document and page. Only deletion or expiry withdraws evidence mid-turn.
 
 ## Not established by this slice (deferred; not claimed)

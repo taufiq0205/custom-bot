@@ -1,5 +1,5 @@
 {
-  "name": "custom-bot", "version": "0.1.0", "private": true, "type": "module",
+  "name": "custom-bot", "version": "0.1.0", "private": true, "license": "MIT", "type": "module",
   "engines": {"node": "22.22.3"},
   "scripts": {"build": "tsc", "typecheck": "tsc --noEmit", "start": "node dist/server.js", "migrate": "node dist/migrate.js", "seed": "node dist/seed.js", "test": "node --test --test-concurrency=1 tests/*.test.mjs"},
   "dependencies": {"better-auth": "1.7.7", "jose": "6.2.12", "pg": "8.23.1", "nodemailer": "10.0.13"},

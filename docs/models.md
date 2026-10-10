@@ -8,7 +8,7 @@ The platform uses three kinds of model, each for a different job. Each can be se
 | **Typed decisions** | Gives structured answers such as a choice, a score or a yes/no, for workflow routing. Never Customer text or authorization. | Jev through the TypeSafe API. Laya or Von locally as alternatives. | Jev built ([#29](https://github.com/taufiq0205/custom-bot/issues/29)); Laya/Von planned in [#30](https://github.com/taufiq0205/custom-bot/issues/30) |
 | **Retrieval embeddings** | Finds the document passages relevant to a Customer's message | `BAAI/bge-small-en-v1.5`, run locally in the worker on CPU | Built (#21). **Optional:** it is installed with one command. |
 
-**Retrieval needs embeddings, and neither DeepSeek nor TypeSafe provides them.** The provider research (`research/PROVIDER-INTEGRATIONS.md`) found no supported embedding endpoint in the DeepSeek or TypeSafe APIs, or in Laya and Von. The specification also forbids silently falling back to a cloud embedding. Document knowledge therefore needs the local model. Generation and decisions can use API keys alone.
+**Retrieval needs embeddings, and neither DeepSeek nor TypeSafe provides them.** The provider research (`docs/research/PROVIDER-INTEGRATIONS.md`) found no supported embedding endpoint in the DeepSeek or TypeSafe APIs, or in Laya and Von. The specification also forbids silently falling back to a cloud embedding. Document knowledge therefore needs the local model. Generation and decisions can use API keys alone.
 
 ## Running without the embedding model (the default)
 
@@ -45,7 +45,7 @@ To change the model:
 1. Choose a model that publishes an ONNX export, with `input_ids`/`attention_mask` (and `token_type_ids` if it uses them) inputs and a `last_hidden_state` output. Read its pooling (`1_Pooling/config.json`) and normalization (`modules.json`) and its query/passage prompts from its model card at the pinned commit.
 2. Update the pins above. Update `Embedder.vectors` if the model pools differently (for example mean pooling instead of CLS) or takes different inputs.
 3. If the vector size is not 384, add a migration changing `source_chunks.embedding` to `vector(N)` (and `dimensions` in the recorded encoding).
-4. Check parity once against the publisher's reference implementation (Sentence Transformers), as recorded in `docs/validation-21.md`.
+4. Check parity once against the publisher's reference implementation (Sentence Transformers), as recorded in `docs/dev-notes/validation-21.md`.
 5. Install it (`docker compose run --rm models`) and restart the worker.
 
 The recorded encoding then differs from the one stored with each version. Existing passages are excluded from answers immediately, because vectors from different models are never compared, even when their sizes match. The worker queues a complete re-index of every active document when it starts. Each document answers again once its new version is complete.
